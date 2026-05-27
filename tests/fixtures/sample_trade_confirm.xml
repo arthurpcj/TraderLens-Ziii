@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Trade Confirmation (TCF) statement for parser tests.
+  Structure + attribute names are FAITHFUL to a real TCF pull captured in
+  spike 002 (2026-05-21, docs/studies/002_*/raw_confirmation_*.xml):
+    - container <TradeConfirms> interleaves <Order> (levelOfDetail=ORDER)
+      with <TradeConfirm> (levelOfDetail=EXECUTION); only EXECUTION is a fill
+    - TCF attribute names DIFFER from Activity (AF): price (not tradePrice),
+      commission (not ibCommission), code O/C (not openCloseIndicator/notes),
+      and there is NO fifoPnlRealized field.
+  Legs synthesized from real MNQ scalps (account id sanitized). Two round-trips:
+  BUY/SELL/BUY/SELL = open/close/open/close.
+-->
+<FlexQueryResponse queryName="IB_Trade_Confirmation_Daily" type="TCF">
+<FlexStatements count="1">
+<FlexStatement accountId="U0000000" fromDate="20260521" toDate="20260521" period="Today" whenGenerated="20260521;121554">
+<TradeConfirms>
+<Order accountId="U0000000" assetCategory="FUT" symbol="MNQM6" description="MICRO E-MINI NASDAQ 100 JUN26" conid="730283085" underlyingSymbol="MNQ" multiplier="2" expiry="20260618" transactionType="" tradeID="" orderID="5301001001" orderReference="" orderTime="20260521;095042" dateTime="20260521;095042" reportDate="20260521" settleDate="20260522" tradeDate="20260521" exchange="" buySell="BUY" quantity="1" price="27042.75" amount="54085.50" proceeds="-54085.50" commission="-0.62" commissionCurrency="USD" code="" orderType="LMT" levelOfDetail="ORDER" />
+<TradeConfirm accountId="U0000000" assetCategory="FUT" symbol="MNQM6" description="MICRO E-MINI NASDAQ 100 JUN26" conid="730283085" underlyingSymbol="MNQ" multiplier="2" expiry="20260618" transactionType="ExchTrade" tradeID="1216857749" orderID="5301001001" execID="0000e432.7a000001.01.01" orderReference="" orderTime="20260521;095042" dateTime="20260521;095042" reportDate="20260521" settleDate="20260522" tradeDate="20260521" exchange="GLOBEX" buySell="BUY" quantity="1" price="27042.75" amount="54085.50" proceeds="-54085.50" commission="-0.62" commissionCurrency="USD" code="O" orderType="LMT" levelOfDetail="EXECUTION" isAPIOrder="Y" />
+<Order accountId="U0000000" assetCategory="FUT" symbol="MNQM6" description="MICRO E-MINI NASDAQ 100 JUN26" conid="730283085" underlyingSymbol="MNQ" multiplier="2" expiry="20260618" transactionType="" tradeID="" orderID="5301001002" orderReference="" orderTime="20260521;095550" dateTime="20260521;095550" reportDate="20260521" settleDate="20260522" tradeDate="20260521" exchange="" buySell="SELL" quantity="-1" price="27043.50" amount="54087.00" proceeds="54087.00" commission="-0.62" commissionCurrency="USD" code="" orderType="LMT" levelOfDetail="ORDER" />
+<TradeConfirm accountId="U0000000" assetCategory="FUT" symbol="MNQM6" description="MICRO E-MINI NASDAQ 100 JUN26" conid="730283085" underlyingSymbol="MNQ" multiplier="2" expiry="20260618" transactionType="ExchTrade" tradeID="1216862213" orderID="5301001002" execID="0000e432.7a000002.01.01" orderReference="" orderTime="20260521;095550" dateTime="20260521;095550" reportDate="20260521" settleDate="20260522" tradeDate="20260521" exchange="GLOBEX" buySell="SELL" quantity="-1" price="27043.50" amount="54087.00" proceeds="54087.00" commission="-0.62" commissionCurrency="USD" code="C" orderType="LMT" levelOfDetail="EXECUTION" isAPIOrder="Y" />
+<TradeConfirm accountId="U0000000" assetCategory="FUT" symbol="MNQM6" description="MICRO E-MINI NASDAQ 100 JUN26" conid="730283085" underlyingSymbol="MNQ" multiplier="2" expiry="20260618" transactionType="ExchTrade" tradeID="1216875621" orderID="5301001003" execID="0000e432.7a000003.01.01" orderReference="MNQscalp_2" orderTime="20260521;100610" dateTime="20260521;100610" reportDate="20260521" settleDate="20260522" tradeDate="20260521" exchange="GLOBEX" buySell="BUY" quantity="1" price="27014.75" amount="54029.50" proceeds="-54029.50" commission="-0.62" commissionCurrency="USD" code="O" orderType="STP" levelOfDetail="EXECUTION" isAPIOrder="Y" />
+<TradeConfirm accountId="U0000000" assetCategory="FUT" symbol="MNQM6" description="MICRO E-MINI NASDAQ 100 JUN26" conid="730283085" underlyingSymbol="MNQ" multiplier="2" expiry="20260618" transactionType="ExchTrade" tradeID="1216888784" orderID="5301001004" execID="0000e432.7a000004.01.01" orderReference="MNQscalp_2" orderTime="20260521;102359" dateTime="20260521;102359" reportDate="20260521" settleDate="20260522" tradeDate="20260521" exchange="GLOBEX" buySell="SELL" quantity="-1" price="27016.00" amount="54032.00" proceeds="54032.00" commission="-0.62" commissionCurrency="USD" code="C" orderType="LMT" levelOfDetail="EXECUTION" isAPIOrder="Y" />
+</TradeConfirms>
+</FlexStatement>
+</FlexStatements>
+</FlexQueryResponse>

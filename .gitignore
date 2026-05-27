@@ -1,0 +1,94 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Claude Code internal (scheduled tasks lock, local settings, plans)
+.claude/
+
+# Local-only collaboration spec — contains local paths + Chinese workflow
+# notes that aren't intended for public contributors. Kept on disk.
+CLAUDE.md
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Project runtime data (real trades — private, never commit)
+data/trades.sqlite
+data/state.json
+data/exports/
+data/
+
+# Runtime logs (root-level only, NOT docs/logs/)
+*.log
+/logs/
+
+# Generated pivot reports (contain real trades — private)
+/reports/
+
+# Raw Flex response dumps captured during spikes (may contain real trades — private)
+docs/studies/**/raw_*.xml
+
+# Local private workspace — dev logs, self-review notes, raw spike results.
+# Personal workflow content not intended for public contributors.
+/_private/
+
+# Chinese docs are LOCAL ONLY — never published to GitHub. Convention:
+# English doc = canonical, no suffix (e.g. OPERATIONS.md); Chinese = same name + _cn.
+*_cn.md
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+tests/fixtures/secrets/
+
+# Secrets — NEVER commit
+.env
+.env.local
+config/config.yaml
+config/gsheet_key.json
+config/*_key.json
+credentials.json
+*.pem
+
+# OS junk
+Thumbs.db
+desktop.ini

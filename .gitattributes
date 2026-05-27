@@ -1,0 +1,11 @@
+# Normalize line endings across platforms.
+# Default: let Git handle text files automatically.
+* text=auto
+
+# Windows-only entry scripts MUST use CRLF, or cmd.exe mis-parses them
+# (LF-only .bat makes cmd treat REM/comment lines as commands -> spurious
+#  "'X' is not recognized as a command" errors under codepage 936).
+#  See knowledge/bugs_history.md BUG-001.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

@@ -1,0 +1,14 @@
+# TraderLens runtime dependencies (v1: IBKR adapter)
+#
+# Tooling rationale: see docs/decisions/001-drop-ibflex.md
+#   - ibflex deliberately NOT included (parser bugs, maintenance stalled)
+#   - HTTP via requests + parse via stdlib xml.etree (zero parse deps)
+
+requests>=2.31              # IBKR Flex Web Service HTTP (two-step flow)
+tzdata>=2024.1              # IANA tz db for zoneinfo (US/Eastern) — Windows has none built-in
+gspread>=6.0                # Google Sheets sync (user category labeling) — v2 backlog
+google-auth>=2.28           # gspread service account auth — v2 backlog
+
+# Dev / test only (not required for src/ runtime)
+# install with: pip install -r requirements.txt  (then pytest is available)
+pytest>=8.0

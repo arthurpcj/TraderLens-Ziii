@@ -1,0 +1,27 @@
+{
+  "_comment": [
+    "FR-PIVOT setup-tag taxonomy. Edit the display names below (the CODES on the",
+    "left are stable join keys; the names on the right are yours to rename).",
+    "",
+    "setup_tags  : code -> human display name, shown in the pivot's by-setup view.",
+    "              ~8 slots reserved; rename / add / remove freely.",
+    "order_ref_aliases : maps a Flex orderReference string (stamped by Backtrader on",
+    "              quant orders) -> a setup_tag CODE. This is the TIER-2 auto-tag:",
+    "              an entry whose order_ref matches here is tagged without manual work.",
+    "              Manual-order round-trips (no order_ref / no match) fall back to the",
+    "              data/annotations.csv explicit tag, else 'untagged'.",
+    "Priority: annotations.csv explicit > order_ref alias > untagged (FR-PIVOT-3c)."
+  ],
+  "setup_tags": {
+    "S1": "Setup 1 (T_intraday)",
+    "S2": "Setup 2 (Q_intraday)",
+    "S3": "Setup 3 (T_CS)",
+    "S4": "Setup 4 (T_DCA)",
+    "S5": "Setup 5 (T_AssetA)",
+    "S6": "Setup 6 (T_ValueIn)",
+    "S7": "Setup 7 (rename me)",
+    "S8": "Setup 8 (rename me)"
+  },
+  "order_ref_aliases": {
+  }
+}

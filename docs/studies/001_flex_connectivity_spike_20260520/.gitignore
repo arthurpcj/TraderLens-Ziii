@@ -1,0 +1,2 @@
+# Raw Flex Query responses contain real trade data — never commit
+raw_response_*.xml
