@@ -9,3 +9,6 @@
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
+
+# POSIX shell scripts MUST use LF (CRLF makes bash misread the shebang).
+*.sh text eol=lf

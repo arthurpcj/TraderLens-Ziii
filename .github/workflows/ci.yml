@@ -42,3 +42,39 @@ jobs:
         # XML fixtures under tests/fixtures/ are anonymized (account=U0000000);
         # the suite does NOT hit live Flex — see ADR-002.
         run: pytest -q
+
+  lint-line-endings:
+    # Windows-only scripts (.bat / .cmd / .ps1) MUST be CRLF — cmd.exe and
+    # PowerShell mis-parse LF-only files under codepage 936 (see
+    # .gitattributes BUG-001). POSIX shell scripts (.sh) MUST be LF —
+    # bash chokes on the CRLF in the shebang line. This job guards both.
+    name: line endings (CRLF for Windows, LF for *.sh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check *.bat / *.cmd / *.ps1 are CRLF
+        run: |
+          failed=0
+          for f in $(git ls-files '*.bat' '*.cmd' '*.ps1'); do
+            if file "$f" | grep -q "CRLF line terminators"; then
+              echo "  OK CRLF: $f"
+            else
+              echo "  FAIL LF: $f  (cmd.exe / PowerShell will mis-parse)"
+              failed=1
+            fi
+          done
+          exit $failed
+
+      - name: Check *.sh are LF
+        run: |
+          failed=0
+          for f in $(git ls-files '*.sh'); do
+            if file "$f" | grep -q "CRLF line terminators"; then
+              echo "  FAIL CRLF: $f  (bash chokes on the shebang)"
+              failed=1
+            else
+              echo "  OK LF: $f"
+            fi
+          done
+          exit $failed
