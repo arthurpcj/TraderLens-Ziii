@@ -13,7 +13,7 @@
 | V1 | `ibflex` library usable | `pip install ibflex` succeeds, import clean |
 | V2 | Token + Query ID configured correctly | `client.download()` returns non-empty XML |
 | V3 | Two-step flow (SendRequest → GetStatement) handled automatically | ibflex internal, caller-transparent |
-| V4 | Field coverage complete (per [REQUIREMENTS FR-FETCH-2](../../specs/REQUIREMENTS.md)) | 14 core fields + 4 enhanced fields all present |
+| V4 | Field coverage complete (14 core + 4 enhanced fields per parser spec) | all present |
 | V5 | At least one NQ/MNQ/ES/MES futures trade captured | (precondition: account has futures fills in the last 30 days) |
 | V6 | `orderReference` field round-tripped (strategy-tag carrier) | attribute present on sample trade |
 
@@ -113,6 +113,6 @@ Token: ***ab12  Query ID: 12345678
 
 ## 5. After passing
 
-V1-V6 all green → kick off `src/ib_sync.py` per [REQUIREMENTS FR-FETCH](../../specs/REQUIREMENTS.md).
+V1-V6 all green → kick off `src/ib_sync.py`.
 
-Any ✗ or surprise → record in a follow-up note and decide whether it affects the v1.0 CSV schema. If it does → bump to v1.1 following the [INTERFACE_CONTRACT §5](../../specs/INTERFACE_CONTRACT.md) SOP.
+Any ✗ or surprise → record in a follow-up note and decide whether it affects the v1.0 CSV schema. If it does → bump the schema version + document in [CHANGELOG.md](../../../CHANGELOG.md).

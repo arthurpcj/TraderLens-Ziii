@@ -4,8 +4,8 @@ All notable changes to TraderLens are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project (loosely) follows [Semantic Versioning](https://semver.org/).
-The cross-project CSV interface contract carries its own independent
-version, see [INTERFACE_CONTRACT.md](docs/specs/INTERFACE_CONTRACT.md) §5.
+The CSV export schema carries its own independent version (v1.0,
+12 columns, frozen).
 
 ---
 
@@ -31,14 +31,13 @@ Initial public release.
 - SQLite archive (20 columns including `asset_type`, `data_source`,
   `order_ref`), `INSERT OR IGNORE` for idempotency. Additive migrations
   handle pre-spike-002 databases.
-- 12-column CSV export (v1.0, frozen) for the downstream MTS DevTest
-  backtester: NQ/MNQ/ES/MES futures only, full-volume "scheme E"
-  (downstream smart matcher does the filtering).
-- PAPER_AUTO ↔ MTS_CONFIRMED state machine for the `category` column,
-  driven by the local annotation layer (setup_tag / score / notes on the
-  opening trade_id).
-- `--lookback N` re-export window for cross-project consistency under the
-  state machine.
+- 12-column CSV export (v1.0, frozen) covering NQ/MNQ/ES/MES futures.
+  Schema-stable for machine consumption by downstream tools.
+- Per-trade-date state machine for the `category` column
+  (`PAPER_AUTO` ↔ `MTS_CONFIRMED`), driven by the local annotation
+  layer (setup_tag / score / notes on the opening trade_id).
+- `--lookback N` re-export window so re-annotated dates flow through
+  to the CSV without re-fetching from the broker.
 
 ### Added — Local analytics
 
@@ -56,14 +55,14 @@ Initial public release.
   manual steps collapsed into one entry point.
 - Local CSV annotation layer (`data/annotations.csv`, 10 cols, keyed by
   opening trade_id). Decoupled from the immutable IB-fact SQLite layer
-  (see [DATA_ARCHITECTURE](docs/specs/DATA_ARCHITECTURE.md)).
+  so re-fetching never overwrites user notes.
 
 ### Added — Reliability
 
 - Two-layer Flex throttle gate (`MIN_INTERVAL_SEC=600`,
   `PENALTY_BOX_SEC=1800`). `1018` → exit immediately + arm the gate; never
   blind-retry. See [ADR-002](docs/decisions/002-flex-rate-limit-policy.md).
-- Granular exit codes for the downstream MTS scheduler: `0` OK / idle,
+- Granular exit codes for schedulers and wrappers: `0` OK / idle,
   `2` RETRYABLE (throttle / network), `3` HARD (auth / token).
 - NY-weekend skip in the scheduler — avoids wasted Flex calls when no
   trading session is active.
@@ -75,20 +74,13 @@ Initial public release.
 - Windows Task Scheduler self-elevating registration script
   (`scripts/register_ib_sync_task.ps1`). Single `--mode auto` task,
   five trigger times mapped to NY 04:00 / 05:00 / 08:00 / 09:00 / 10:00.
-- 171 pytest tests covering state, Flex client, parser (Activity +
+- Test suite covering state, Flex client, parser (Activity +
   Confirmation, plus robustness suites), SQLite store, exporter and
-  state machine, annotations, pivot, round-trip, overlap, timezone, and
-  end-to-end integration.
+  state machine, annotations, pivot, round-trip, overlap, timezone,
+  and end-to-end integration.
 
 ### Added — Documentation
 
-- [REQUIREMENTS.md](docs/specs/REQUIREMENTS.md) — full functional /
-  non-functional / failure-handling / acceptance spec.
-- [INTERFACE_CONTRACT.md](docs/specs/INTERFACE_CONTRACT.md) — frozen
-  12-column CSV contract with the MTS DevTest project + cross-project
-  commit SOP.
-- [DATA_ARCHITECTURE.md](docs/specs/DATA_ARCHITECTURE.md) — three-layer
-  model (fact / annotation / derived), ownership and mutability rules.
 - [SPEC_Code_Review.md](docs/specs/SPEC_Code_Review.md) — pre-implementation
   review checklist used in the project.
 - [OPERATIONS.md](docs/guides/OPERATIONS.md) — end-user operations manual.

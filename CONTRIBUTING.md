@@ -120,9 +120,8 @@ not-list. In addition:
   support in SQLite (not CSV export).
 - **No**: real-time / TWS API integration, automatic order placement,
   introducing heavy framework dependencies (the project is stdlib-first;
-  see [ADR-001](docs/decisions/001-drop-ibflex.md)), modifying the
-  v1.0 CSV schema without coordinated cross-project review (see
-  [INTERFACE_CONTRACT §5](docs/specs/INTERFACE_CONTRACT.md)).
+  see [ADR-001](docs/decisions/001-drop-ibflex.md)), breaking the
+  v1.0 CSV export schema without a version bump + CHANGELOG entry.
 
 ## Documentation conventions
 
@@ -133,6 +132,39 @@ not-list. In addition:
   decision.
 - Link generously, duplicate sparingly.
 
+## Repository layout
+
+```
+traderlens/
+├── README.md / LICENSE / CHANGELOG.md / CONTRIBUTING.md / DISCLAIMER.md
+├── .env.example                    # IBKR Flex token template
+├── docs/
+│   ├── INDEX.md                    # documentation index
+│   ├── guides/OPERATIONS.md        # user operations manual
+│   ├── decisions/                  # ADRs (001 drop-ibflex, 002 rate-limit, 003 license)
+│   ├── specs/SPEC_Code_Review.md   # internal code-review process
+│   └── studies/                    # spikes / technical investigations
+├── src/
+│   ├── ib_sync.py                  # orchestrator (Flex → SQLite → auto-export)
+│   ├── flex_client.py              # Flex two-step HTTP flow
+│   ├── parser.py                   # XML → typed TradeRow (Activity + Confirmation)
+│   ├── sqlite_store.py             # SQLite archive + idempotent upsert + migrations
+│   ├── exporter.py                 # CSV export + state machine
+│   ├── state.py                    # state.json + rate-limit gate
+│   ├── annotations.py              # local annotation layer (setup_tag / score / notes)
+│   ├── roundtrip.py                # round-trip pairing for the local pivot
+│   ├── pivot.py                    # self-contained HTML pivot generator
+│   └── constants.py / errors.py
+├── assets/vendor/                  # pinned 3rd-party JS/CSS for the local pivot (MIT)
+├── config/pivot_tags.json          # local pivot setup_tag presets
+├── scripts/
+│   ├── run_ib_sync.bat             # project entry (venv + python -m src.ib_sync)
+│   ├── review.bat                  # one-shot review flow (annotate → re-export → re-pivot)
+│   └── register_ib_sync_task.ps1   # register the scheduled task (self-elevating)
+├── tests/                          # pytest
+└── data/                           # gitignored — real trades (SQLite, CSV, state, logs)
+```
+
 ---
 
-*Last updated: 2026-05-28.*
+*Last updated: 2026-05-29.*

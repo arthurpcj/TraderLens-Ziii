@@ -1,7 +1,7 @@
 # Code Review Standard — TraderLens
 
-> Single authoritative document. Any change to `src/*.py` must follow this workflow. Adapted from the MTS project `SPEC_Code_Review.md` v2.0,
-> with TraderLens domain adjustments: cross-project csv contract / Flex rate limit (permanent-ban risk) / idempotency / field robustness.
+> Single authoritative document. Any change to `src/*.py` must follow this workflow.
+> TraderLens domain adjustments: CSV export schema stability / Flex rate limit (permanent-ban risk) / idempotency / field robustness.
 
 ---
 
@@ -58,13 +58,13 @@ After completing the code change, answer each item before running any tests. Eve
 | U1 | Have CLI parameters changed (added/removed/default values)? | |
 | U2 | Under the same parameters, has implicit behavior changed (execution path/conditions/ordering)? | |
 | U3 | Have output file names/locations/formats changed (csv / SQLite / log paths)? | |
-| U4 | **Has the csv 12-column contract changed** (column names/order/types/encoding)? If yes -> trigger [INTERFACE_CONTRACT §5](INTERFACE_CONTRACT.md) cross-project sync | |
+| U4 | **Has the csv 12-column export schema changed** (column names/order/types/encoding)? If yes -> version bump + CHANGELOG entry + notify any downstream consumers | |
 | U5 | Is log observability affected (process prints / RUN SUMMARY)? Has state.json schema changed? | |
 
-### E. Cross-Module + Cross-Project Impact
+### E. Cross-Module + Downstream Impact
 
 - Which modules/callers depend on the modified function? (confirm with `grep`)
-- **Downstream MTS project**: did the csv schema or semantics change? -> Must follow the INTERFACE_CONTRACT §5 SOP for cross-project review + changelog
+- **Downstream CSV consumers**: did the csv schema or semantics change? -> Bump the CSV schema version, document in CHANGELOG, notify any known consumers.
 - Did state.json / SQLite schema change? -> Compatibility with old files?
 
 ### F. Risk Rating
@@ -130,8 +130,8 @@ Requires user action?: Yes/No (reason)
 Code Review: APPROVED
 - Default behavior: [unchanged / changed: ...]
 - Corner cases: C1[conclusion] C4[conclusion] C5[conclusion] ... (omit N/A)
-- User interface: U4[csv contract unchanged / changed -> followed §5 SOP] U5[...]
-- Cross-module/cross-project: [None / MTS side needs...]
+- User interface: U4[csv schema unchanged / changed -> bumped + CHANGELOG] U5[...]
+- Cross-module / downstream impact: [None / consumers must update ...]
 Tests: PASSED ([N] passed) / SKIPPED (Green: syntax only)
 Risk: Green / Yellow / Red
 
@@ -141,4 +141,4 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ---
 
 *Version: 1.0 | Created: 2026-05-20*
-*TraderLens adjustments: cross-project csv contract (U4/E), Flex rate-limit iron rule (C4/Red), field robustness (C2/C9), pytest in place of backtest, RUN SUMMARY observability (U5)*
+*TraderLens adjustments: CSV export schema stability (U4/E), Flex rate-limit iron rule (C4/Red), field robustness (C2/C9), pytest in place of backtest, RUN SUMMARY observability (U5)*

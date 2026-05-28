@@ -78,7 +78,7 @@ def gate_flex_call(state) -> str | None:
 
 - Task Scheduler trigger frequency ≤ 4 times/day (early morning / midday / EOD / late evening).
 - Each trigger runs the throttle gate first — most return within a second. Even with 4 triggers, the actual Flex call count is 1-2.
-- The user-side wrapper `.bat` does not bypass the gate (per INTERFACE_CONTRACT §9: wrappers only invoke the entrypoint `.bat`, never Flex directly).
+- Any user-side wrapper script does not bypass the gate — wrappers should invoke the project entrypoint `.bat` (which honours the gate), never the Flex Web Service directly.
 
 ## Consequences
 

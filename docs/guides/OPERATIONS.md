@@ -1,7 +1,7 @@
 # TraderLens (ib_sync) — User Operations Manual
 
 > Day-to-day user guide: commands / interfaces / viewing results / logs / fixing problems / human-intervention points / examples.
-> Scope: Priority 1 (Confirmation same-day + Activity T+1 → SQLite full archive → export csv for MTS) + single-task `--mode auto` auto-scheduling + Priority 2 local HTML pivot.
+> Scope: Priority 1 (Confirmation same-day + Activity T+1 → SQLite full archive → CSV export) + single-task `--mode auto` auto-scheduling + Priority 2 local HTML pivot.
 > Project root: `D:\02.Projects\13.IB_Trade_Sync\` (all commands below run from here).
 
 ---
@@ -23,16 +23,16 @@ The IBKR Flex Web Service enforces a **minimum interval of ≥ 10 minutes betwee
 
 ```
 Trade Confirmation (same-day, post-NY-close) ─┐
-                                              ├─▶ SQLite full archive ─▶ export csv (NQ/MNQ/ES/MES) ─▶ to MTS
+                                              ├─▶ SQLite full archive ─▶ CSV export (NQ/MNQ/ES/MES)
 Activity (T+1, next-day reconcile/backup) ────┘    data/trades.sqlite      data/exports/*.csv
 
        Driven by a single scheduled task running `--mode auto`; Python picks the mode by NY time + state.
 ```
 
 - **Fetch cadence (dual track)**:
-  - **Confirmation same-day** (after NY 16:00 close): **primary** — exports csv to MTS; today's trades land today.
+  - **Confirmation same-day** (after NY 16:00 close): **primary** — captures today's fills today, then writes CSV.
   - **Activity T+1** (after NY 20:10): **backup / reconcile** — settled data for yesterday, catches anything Confirmation missed.
-- **Full archive**: SQLite stores **all** trades (incl. stocks, non-target futures) for local analysis; **only** NQ/MNQ/ES/MES futures are exported to MTS.
+- **Full archive**: SQLite stores **all** trades (incl. stocks, non-target futures) for local analysis; **only** NQ/MNQ/ES/MES futures land in the CSV export.
 - **Idempotent**: running N times/day or re-fetching 30 days is safe; de-duplicated by `trade_id`.
 
 ---
@@ -44,7 +44,7 @@ Activity (T+1, next-day reconcile/backup) ────┘    data/trades.sqlite 
 ```
 IBKR_FLEX_TOKEN=<your Flex token>
 IBKR_FLEX_QUERY_ID=<Activity Query ID>                          # T+1 backup/reconcile (in production)
-IBKR_FLEX_QUERY_ID_CONFIRMATION=<Trade Confirmation Query ID>   # same-day primary, exports csv to MTS (in production)
+IBKR_FLEX_QUERY_ID_CONFIRMATION=<Trade Confirmation Query ID>   # same-day primary (in production)
 ```
 
 - Get token / query IDs from IBKR Client Portal → **Settings → Flex Web Service**.
@@ -70,7 +70,7 @@ After registering (times are **Beijing local**):
   - 08/09/10 Beijing ≈ **NY 20:00–22:00** (Activity slot + retries)
   - Dropped: Beijing 06/07 (NY 18/19 dead zone — no useful work in either DST) and 11 (over-retry; T+1 next-day catches up)
 - **Every trigger runs `--mode auto`**, Python picks the mode by NY time + state:
-  - Run **Confirmation** (not yet captured today + NY ≥16:00) → exports csv to MTS
+  - Run **Confirmation** (not yet captured today + NY ≥16:00) → captures same-day fills
   - Run **Activity** (NY ≥20:10 + non-empty backfill window)
   - Else **local skip** (sub-second exit, **no Flex call**, RC_OK)
 - **At most 2 real Flex calls/day** (Confirmation + Activity, one each); the other 3 triggers are local skips
@@ -104,7 +104,7 @@ Unregister-ScheduledTask -TaskName 'TraderLens IB Sync' -Confirm:$false
 | Purpose | Command |
 |---|---|
 | **Auto-pick mode and run once** (same as the scheduler) | `venv\Scripts\python.exe -m src.ib_sync --mode auto` |
-| **Force same-day Confirmation** (primary, exports csv to MTS) | `venv\Scripts\python.exe -m src.ib_sync --mode confirmation` |
+| **Force same-day Confirmation** (primary, captures same-day fills) | `venv\Scripts\python.exe -m src.ib_sync --mode confirmation` |
 | **Force Activity** backup/reconcile (T+1, default) | `venv\Scripts\python.exe -m src.ib_sync` or `--mode activity` |
 | Via the project-entry bat (incl. 30s boot network wait) | `scripts\run_ib_sync.bat --mode auto` (add `--no-delay` to skip the wait when debugging) |
 | **Re-export one day's csv** (reads SQLite only, **no Flex call**, safe) | `venv\Scripts\python.exe -m src.exporter --date 2026-05-19` |
@@ -120,7 +120,7 @@ Everything lives under `data\` (gitignored — contains real trades):
 
 | Artifact | Path | Notes |
 |---|---|---|
-| **csv for MTS** (cross-project interface) | `data\exports\mts_trades_{YYYY-MM-DD}.csv` | 12 cols v1.0, one file per trade date, NQ/MNQ/ES/MES only |
+| **CSV export** | `data\exports\mts_trades_{YYYY-MM-DD}.csv` | 12 cols v1.0, one file per trade date, NQ/MNQ/ES/MES only |
 | **Full archive** (local analysis) | `data\trades.sqlite` | incl. stocks + all futures |
 | **Run state** | `data\state.json` | last run/success time, throttle state, last error |
 | **Logs** | `logs\ib_sync_YYYYMMDD.log` | appended per run + RUN SUMMARY |
@@ -128,7 +128,7 @@ Everything lives under `data\` (gitignored — contains real trades):
 ### 5.1 The csv
 
 Open in Excel / a text editor. 12 columns: `trade_id, trade_date, trade_time, underlying, expiry, buy_sell, quantity, trade_price, ib_commission, open_close, category, notes`.
-> `ib_commission` is the **IB-native signed value** (cost is negative, e.g. `-0.62`). `category` is fixed `PAPER_AUTO` (MTS ignores it).
+> `ib_commission` is the **IB-native signed value** (cost is negative, e.g. `-0.62`). `category` defaults to `PAPER_AUTO`.
 
 ### 5.2 The SQLite archive (no extra tools — use the venv python)
 
@@ -236,7 +236,7 @@ Get-Content logs\ib_sync_(Get-Date -Format yyyyMMdd).log -Tail 40
 
 **Scenario B — the daily norm**: do nothing. To confirm: `Get-ScheduledTask -TaskName 'TraderLens IB Sync' | Get-ScheduledTaskInfo` and check `LastTaskResult` (0 = OK).
 
-**Scenario C — yesterday's csv didn't reach MTS**
+**Scenario C — yesterday's CSV is missing**
 ```powershell
 # Check whether SQLite has target futures for that day
 venv\Scripts\python.exe -c "import sqlite3;c=sqlite3.connect('data/trades.sqlite');print(c.execute(\"SELECT COUNT(*) FROM trades WHERE trade_date='2026-05-19' AND underlying IN ('NQ','MNQ','ES','MES')\").fetchone())"
@@ -286,7 +286,7 @@ venv\Scripts\python.exe -m src.pivot --review-flow
 1. Refresh `data\annotations.csv` (preserves your existing tags, appends new round-trips). Also: snapshots the previous file to `data\annotations.bak\{timestamp}.csv` (R1, last 20 kept).
 2. Hand the csv to Excel (`os.startfile`, opens in your default csv handler).
 3. **Wait for you to press Enter** in the terminal — fill in Excel, **Ctrl+S** to save, then return to the terminal and hit Enter.
-4. **Re-export `data\exports\mts_trades_{date}.csv` for the last 90 trade_dates** (state machine flips affected dates to State B / `category=MTS_CONFIRMED` per the latest annotations). Then rebuild `reports\pivot_latest.html` and auto-open in browser.
+4. **Re-export `data\exports\mts_trades_{date}.csv` for the last 90 trade_dates** (re-applies the per-date state machine to recompute CSV contents from the latest annotations). Then rebuild `reports\pivot_latest.html` and auto-open in browser.
 
 Override the lookback window:
 ```powershell
@@ -300,27 +300,11 @@ Notes:
 - **Ctrl+C** during the Enter wait aborts cleanly (rc=130). Your annotations stay saved as-is, no regen happens.
 - If you only want to **look at** the report (no annotation changes), skip `--review-flow` — just run `python -m src.pivot`.
 
-### 11.2 State machine: how annotations drive MTS csv
-
-The csv files in `data\exports\` are decided **per trade_date** by IB_Sync's annotation state:
-
-- **State A** (you haven't annotated any round-trip on that date): csv contains all NQ/MNQ/ES/MES futures legs for the date, column `category` = `PAPER_AUTO`. MTS treats unmatched trades as possible user-manual (default-skip).
-- **State B** (you annotated at least one round-trip on that date with a setup_tag in the MTS-relevant set — currently `{Q_intraday}`): csv contains **only** those MTS-confirmed round-trips' legs, column `category` = `MTS_CONFIRMED`. MTS treats unmatched trades as real-MTS-trade-missed (FORCE_WRITTEN with alert).
-
-So when you annotate `Q_intraday` for a round-trip, the next `--review-flow` run flips that round-trip's date(s) to State B in the next re-export — MTS will from then on treat that date's csv as "audited".
-
-The state machine + R1 backup + atomic write + schema validation are sedimented in [DATA_ARCHITECTURE.md](../specs/DATA_ARCHITECTURE.md) (English canonical).
-
-### 11.3 Wrapper.bat MTS-loop contract (90-day lookback)
-
-When your `daily_run.bat` calls MTS import, it MUST loop the last 90 trade_dates (matching IB_Sync's `--review-flow --lookback 90` default). Asymmetric N causes silent drift — IB_Sync changes 60 days ago, but wrapper only imports 7 days → MTS misses the update. See [INTERFACE_CONTRACT §5.6 v1.1 (2026-05-26) C9](../specs/INTERFACE_CONTRACT.md) for the contract and [§9.6](../specs/INTERFACE_CONTRACT.md) for an updated wrapper example.
-
 ---
 
 ## Related docs
-- Cross-project csv contract: `docs/specs/INTERFACE_CONTRACT.md`
-- **Data architecture (3-layer model)**: `docs/specs/DATA_ARCHITECTURE.md` (English canonical)
-- Requirements / failure handling: `docs/specs/REQUIREMENTS.md`
 - Rate-limit policy (decision): `docs/decisions/002-flex-rate-limit-policy.md`
+- License & dual-licensing rationale: `docs/decisions/003-license-agpl-3.0.md`
+- Full documentation index: `docs/INDEX.md`
 
 *Last updated: 2026-05-26 (state machine A/B + category dual + R1 backup + --lookback flag + 4-step review-flow)*

@@ -1,137 +1,74 @@
-# TraderLens — Multi-Broker Trade Sync & Analytics
+# TraderLens
 
-> **Status (v1)**: Live on a daily Windows scheduled task —
-> - ✅ IBKR Activity Flex → SQLite full archive → 12-column CSV export (T+1, settled)
-> - ✅ Local interactive HTML pivot (round-trip pairing, KPI / equity / calendar / by-setup / detail, all filter-linked) — self-contained single file, no server
-> - ✅ Local CSV annotation layer (setup_tag / score / notes, keyed by opening trade_id) driving the PAPER_AUTO ↔ MTS_CONFIRMED state machine for the downstream backtester
-> **In progress**: same-day Trade Confirmation capture (TCF spike #002).
-> **Deferred to v2**: Google Sheet labeling layer (superseded by the local CSV annotation layer above).
-> **Naming**: *TraderLens* is the broker-agnostic umbrella. v1 ships the IBKR adapter only (`src/ib_sync`); future siblings could be `coinbase_sync`, `td_sync`, etc.
-> **License**: [AGPL-3.0](LICENSE) — see [ADR-003](docs/decisions/003-license-agpl-3.0.md) for rationale.
+**See your trading patterns clearly.** Turn your broker's trade
+history into a single self-contained HTML report — equity curve,
+calendar heatmap, per-setup scoring, drill-down detail — all
+filter-linked, all offline, no server.
 
 ![TraderLens HTML pivot — overview](assets/screenshots/01-overview.png)
 
-*Screenshot generated from the bundled [demo data](demo/) (50 anonymised paper trades with MES position size rescaled to make the equity curve more illustrative).*
+*Screenshot from the bundled [demo data](demo/) — 50 anonymised paper
+trades.*
 
 ---
 
-## 1. What it does
+## Who is this for?
 
-Fetch your IBKR trades via the **Flex Web Service**, archive **everything** to SQLite, and:
-- export the target futures (NQ/MNQ/ES/MES) as a **12-column CSV** for a downstream backtester (the [MTS DevTest](https://github.com/arthurpcj/MTS-backtest) project), and
-- generate a **self-contained HTML pivot** for local review (round-trip pairing, derived metrics, calendar/by-setup/detail breakdowns).
+You trade through a broker that gives you a structured trade history
+(Interactive Brokers today; more adapters welcome). At the end of
+the week you find yourself asking:
 
-Two consumers, one pipeline:
-1. **MTS feed** — `data/exports/mts_trades_{date}.csv` (target futures only) for the MTS project's actual-trade log.
-2. **Local analytics** — the full SQLite archive (incl. stocks & non-target futures) rendered into a single HTML file for personal review, no server required.
+- Which setups actually make money?
+- When in the day am I most profitable?
+- Did Tuesday's losses come from one bad session, or many small
+  drips across the week?
 
----
-
-## 2. Architecture (current v1)
-
-```
-Windows Task Scheduler  (logon + daily 21:00 local = NY 08:00/09:00)
-        │
-        ▼
- scripts/run_ib_sync.bat ──▶ python -m src.ib_sync
-        │
-        ▼
- IBKR Flex (Activity, Last 30 days)
-        │  two-step: SendRequest → GetStatement   (requests; ibflex dropped)
-        ▼
- parse (stdlib xml.etree)
-        │
-        ▼
- SQLite  data/trades.sqlite   ← FULL archive (stocks + all futures), idempotent
-        │
-        ▼
- export  data/exports/mts_trades_{date}.csv   ← NQ/MNQ/ES/MES only, 12 cols v1.0
-        │  (one-way file interface; ib_sync never reads MTS, never knows signal_id)
-        ▼
- MTS DevTest project reads the CSV
-```
-
-- **Zero cross-project coupling**: ib_sync does not read any MTS file, call any MTS API, or know the `signal_id` concept.
-- **Single interface**: the 12-column CSV (`INTERFACE_CONTRACT.md`, v1.0 frozen). Filtering (4 target underlyings) happens at **export**, not fetch — so SQLite stays a complete archive for local analysis.
+Spreadsheets get you there — slowly. TraderLens answers those
+questions in a single HTML file you can open in any browser, offline.
 
 ---
 
-## 3. Pipeline details
+## Try the demo (zero setup)
 
-- **Fetch window**: up to **yesterday (US/Eastern)** — settled, stable data (T+1). Trade-day logic uses ET, never the local calendar date.
-- **Idempotent**: `trade_id` primary key + `INSERT OR IGNORE`; running N times/day or re-fetching the rolling 30 days converges.
-- **State** (`data/state.json`): backfill window (`last_success_trade_date`), rate-limit gate (`last_flex_call_ts`, `throttled_until_ts`), last error.
-- **Exit codes** (consumed by the scheduler / a future MTS wrapper): `0` OK/idle · `2` RETRYABLE (throttle/network) · `3` HARD (auth/token expired).
+**Double-click [`demo.html`](demo.html)** — that's it.
 
-### ⚠ Flex rate limiting (ADR-002 — permanent-ban risk)
-A built-in gate enforces a **≥10-minute interval** between Flex calls; a `1018` throttle triggers a **30-minute penalty box**; failures **never blind-retry** (they wait for the next scheduled trigger). Treat Flex as a once-daily batch, not a pollable API.
+It's a self-contained HTML file (~440 KB, jQuery + PivotTable.js
+inlined) generated from 50 anonymised paper trades. Opens in any
+browser on any OS, works offline, runs no code, touches no other
+file on your machine.
 
----
+If you like what you see, jump to [Run it on your own data](#run-it-on-your-own-data).
 
-## 4. Tech stack
-
-| Layer | Choice | Note |
-|---|---|---|
-| HTTP | [`requests`](https://pypi.org/project/requests/) | self-implemented two-step Flex flow (~30 lines); ibflex dropped ([ADR-001](docs/decisions/001-drop-ibflex.md)) |
-| XML parse | stdlib `xml.etree.ElementTree` | parses `<Trade>` (Activity) / `<TradeConfirm>` (Confirmation) |
-| Storage | SQLite (`trade_id` PK, `INSERT OR IGNORE`) | 18-col full archive |
-| State | `state.json` | gate + backfill window; updated only on success |
-| Schedule | Windows Task Scheduler (logon + 1×/day) | the Python gate de-dups extra triggers ([ADR-002](docs/decisions/002-flex-rate-limit-policy.md)) |
-| Tests | `pytest` | 171 passing |
+Bundle details (the SQLite + CSV the HTML was generated from, plus
+how the data was anonymised and how to re-run the pipeline locally):
+[demo/README.md](demo/README.md).
 
 ---
 
-## 5. Quick start
+## What you get
 
-### Try it without an IBKR account (demo data)
+Five views, all rendered into one self-contained HTML file
+(~400 KB, opens in any browser, works offline):
 
-```powershell
-python -m venv venv
-venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-
-mkdir data 2>$null
-copy demo\trades.sqlite      data\trades.sqlite
-copy demo\annotations.csv    data\annotations.csv
-venv\Scripts\python.exe -m src.exporter --date 2026-05-19
-venv\Scripts\python.exe -m src.pivot
-start reports\pivot.html
-```
-
-See [demo/README.md](demo/README.md) for what's in the bundle (50 anonymised trades from a paper account, with MES position size rescaled ×8 to make the equity curve more illustrative).
-
-### Real run (live IBKR data)
-
-```powershell
-# 1. Configure credentials (never committed)
-#    .env:  IBKR_FLEX_TOKEN, IBKR_FLEX_QUERY_ID  (see .env.example)
-
-# 2. Run once (manual)
-venv\Scripts\python.exe -m src.ib_sync
-
-# 3. Enable automatic daily runs (Windows scheduled task)
-powershell -ExecutionPolicy Bypass -File scripts\register_ib_sync_task.ps1
-
-# 4. Re-export one day's CSV (reads SQLite only, no Flex call)
-venv\Scripts\python.exe -m src.exporter --date 2026-05-19
-```
-
-Full operations guide: **[docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md)** (commands, logs, exit codes, troubleshooting, register/unregister).
-
----
-
-## Screenshots
-
-The HTML pivot exposes five filter-linked views, all rendered from the SQLite + annotations archive into one self-contained file.
+- **KPI block** — win rate, profit factor, drawdown, average / best /
+  worst trade.
+- **Equity curve** — cumulative P&L with date ticks and a drawdown
+  band underneath.
+- **Calendar heatmap** — daily P&L by date; click a day to drill in.
+- **By-setup scoring** — how each of your tagged strategies actually
+  performs.
+- **Pivot + detail table** — drag-and-drop pivot (PivotTable.js) plus
+  a sortable / filterable trade list, both reacting to the same
+  filter state.
 
 <details>
-<summary><strong>Click to expand — equity curve / calendar / by-setup / pivot / detail</strong></summary>
+<summary><strong>More screenshots</strong> — equity / calendar / by-setup / pivot / detail</summary>
 
-### Equity curve (with date ticks)
+### Equity curve
 
 ![equity curve](assets/screenshots/02-equity-curve.png)
 
-### Calendar heatmap (6-col Mon-Fri+Sun)
+### Calendar heatmap
 
 ![calendar heatmap](assets/screenshots/03-calendar.png)
 
@@ -143,101 +80,188 @@ The HTML pivot exposes five filter-linked views, all rendered from the SQLite + 
 
 ![pivot table](assets/screenshots/05-pivot.png)
 
-### Filter-linked detail table
+### Detail table (filter-linked)
 
 ![detail table](assets/screenshots/06-detail.png)
 
 </details>
 
-> The interactive version: open [`demo/pivot.html`](demo/pivot.html) in any browser (no server, no installs).
+> Live version: [`demo.html`](demo.html) at the project root —
+> just double-click.
 
 ---
 
-## 6. Repository layout
+## Run it on your own data
 
-```
-traderlens/
-├── README.md                       # this file
-├── LICENSE                         # AGPL-3.0
-├── .env.example                    # IBKR_FLEX_TOKEN / IBKR_FLEX_QUERY_ID template
-├── .gitignore                      # secrets / runtime data / venv / private notes
-├── docs/
-│   ├── INDEX.md                    # documentation index
-│   ├── specs/
-│   │   ├── REQUIREMENTS.md         # FR / NFR / failure handling / acceptance
-│   │   ├── INTERFACE_CONTRACT.md   # ★ cross-project CSV contract (12 cols)
-│   │   ├── DATA_ARCHITECTURE.md    # 3-layer model: fact / annotation / derived
-│   │   └── SPEC_Code_Review.md     # internal code-review process
-│   ├── guides/OPERATIONS.md        # user operations manual
-│   ├── decisions/                  # ADRs (001 drop-ibflex, 002 rate-limit, 003 license)
-│   └── studies/                    # spikes / technical investigations
-├── src/
-│   ├── ib_sync.py                  # orchestrator (Flex → SQLite → auto-export)
-│   ├── flex_client.py              # Flex two-step HTTP flow
-│   ├── parser.py                   # XML → typed TradeRow (Activity + Confirmation)
-│   ├── sqlite_store.py             # 20-col SQLite archive + idempotent upsert + migrations
-│   ├── exporter.py                 # 12-col CSV export + state machine (PAPER_AUTO ↔ MTS_CONFIRMED)
-│   ├── state.py                    # state.json + rate-limit gate
-│   ├── annotations.py              # local annotation layer (setup_tag / score / notes)
-│   ├── roundtrip.py                # round-trip pairing for the local pivot
-│   ├── pivot.py                    # self-contained HTML pivot generator
-│   ├── constants.py / errors.py    # config constants / typed errors
-├── assets/vendor/                  # pinned 3rd-party JS/CSS for the local pivot (jQuery, pivottable)
-├── config/pivot_tags.json          # local pivot setup_tag presets
-├── scripts/
-│   ├── run_ib_sync.bat             # project entry (venv + python -m src.ib_sync)
-│   ├── review.bat                  # one-shot review flow (annotate → re-export → re-pivot)
-│   └── register_ib_sync_task.ps1   # register the scheduled task (self-elevating)
-├── tests/                          # pytest (171 passing)
-└── data/                           # gitignored — real trades (SQLite, CSV, state, logs)
+TraderLens v1 ships an adapter for **Interactive Brokers**, using
+their read-only Flex Web Service.
+
+**One-time setup** (~5 minutes):
+
+1. Get a Flex token from IBKR Client Portal → Settings → Flex Web
+   Service. You'll create one *Activity* query and (optionally) one
+   *Trade Confirmation* query.
+2. Copy `.env.example` to `.env` and fill in:
+   ```
+   IBKR_FLEX_TOKEN=...
+   IBKR_FLEX_QUERY_ID=...
+   ```
+   `.env` is gitignored — never gets committed.
+
+**Daily use (Windows)** — **double-click [`scripts\run_ib_sync.bat`](scripts/run_ib_sync.bat)**.
+That's it. It fetches, archives, and rewrites the CSV. On macOS /
+Linux for now, run the underlying command directly:
+`venv/bin/python -m src.ib_sync` (a `.sh` wrapper is a welcome
+contribution).
+
+To make it fully automatic (Windows runs it at logon + a few times
+a day, with the rate-limit gate handling everything):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\register_ib_sync_task.ps1
 ```
 
----
+After that you mostly forget about it. The HTML pivot gets refreshed
+by running `scripts\review.bat` when you want to annotate / re-score.
 
-## 7. Boundary with the MTS project (zero coupling, single interface)
+Full operations manual (logs, exit codes, troubleshooting, all the
+commands): [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md).
 
-| Dimension | Design |
-|---|---|
-| ib_sync → MTS dependency | **none** (no MTS files / APIs / `signal_id` / command names) |
-| MTS → ib_sync dependency | reads one CSV (path set in MTS-side config) |
-| Sole interface | `mts_trades_{date}.csv` — 12 cols, v1.0 frozen ([§2](docs/specs/INTERFACE_CONTRACT.md)) |
-| Filtering | export-stage (NQ/MNQ/ES/MES); MTS matches rows to its benchmark log (scheme E) |
-| `ib_commission` | IB-native **signed** value (cost negative); MTS adds it (not subtracts) — [§5.6 C5](docs/specs/INTERFACE_CONTRACT.md) |
-| Contract changes | dual-project review + version bump ([§5](docs/specs/INTERFACE_CONTRACT.md)) |
-
----
-
-## 8. Roadmap
-
-- ✅ **Local interactive HTML pivots** — shipped: round-trip pairing, KPI block, equity curve (with date ticks), calendar heatmap, by-setup scoring, full filter-linked detail table; single self-contained file.
-- ✅ **Local CSV annotation layer** — shipped: `data/annotations.csv` (setup_tag / score / notes, keyed by opening trade_id) drives the PAPER_AUTO ↔ MTS_CONFIRMED state machine for csv export.
-- 🔧 **Same-day capture** — Trade Confirmation Flex query (`<TradeConfirm>`) to fetch *today's* fills after close. Spike #002 verifies `tradeID` consistency vs the Activity archive, enabling a single-table merge (Activity remains the T+1 authoritative correction).
-- 🔧 **Pivot Tier-2** — five enhancements pending design (CSV export of current filter, auto-regenerate after each scheduled sync, …).
-- ⏳ **Cross-project scheduler** — user-level wrapper chaining ib_sync + MTS import (MTS paper W5+).
-- ❌ **Google Sheet labeling** — deferred to v2 indefinitely (replaced by the local CSV annotation layer above).
+> **Flex rate limit, please read once.** Interactive Brokers enforces
+> a minimum 10-minute interval between Flex calls; abuse can get your
+> IP permanently banned for *all* IBKR API access. TraderLens
+> enforces this in code (10-min gate + 30-min penalty box, never
+> blind-retries). Don't disable the gate — see [ADR-002](docs/decisions/002-flex-rate-limit-policy.md).
 
 ---
 
-## 9. Out of scope
+## Privacy and data ownership
 
-- ❌ Real-time intraday monitoring / TWS API
-- ❌ Automatic order placement / risk halts
-- ❌ Options / stocks / FX **export** (futures NQ/MNQ/ES/MES only for MTS; stocks are archived for local analysis but not exported)
-- ❌ MTS-internal concepts: `signal_id`, R-multiple, slippage, mode inference (computed on the MTS side)
-- ❌ Reading any MTS file (zero cross-project read coupling)
+**Everything stays on your machine.** TraderLens is local-first —
+no author-run backend, no cloud service, no telemetry, no analytics,
+no crash reporter. The author has no way to see your trades, account
+number, Flex token, name, IP, or anything else. There is no "we" for
+your data to go to.
+
+What lives where (all on your machine, all gitignored):
+
+- **Broker credentials** — `.env` (`IBKR_FLEX_TOKEN`,
+  `IBKR_FLEX_QUERY_ID`).
+- **Trade data** — `data/trades.sqlite`, `data/annotations.csv`,
+  `data/exports/*.csv`, `data/state.json`.
+- **HTML reports** — `reports/pivot_latest.html`.
+- **Logs** — `logs/ib_sync_*.log`.
+
+Every network connection TraderLens ever makes:
+
+1. **Your machine → Interactive Brokers** Flex Web Service
+   (`https://*.interactivebrokers.com/...`), authenticated with
+   *your* Flex token, fetching *your* account's trades. Read-only.
+2. `pip install -r requirements.txt` — only at setup, only to PyPI.
+
+That's it. There is no item 3. If a future feature ever needs a
+new network destination (e.g. an opt-in cloud annotation sync), it
+will be documented here, opt-in, and disabled by default.
+
+Third-party JavaScript bundled in the HTML pivot (jQuery, jQuery UI,
+PivotTable.js) is **vendored locally** under `assets/vendor/` — the
+report has no CDN dependencies and works fully offline.
+
+---
+
+## Roadmap
+
+- **Pivot Tier-2** — export current filter as CSV, auto-regenerate
+  after each sync, more cross-cuts.
+- **Same-day capture** — capture today's fills after the close via
+  the Trade Confirmation Flex query (alongside the existing T+1
+  Activity feed).
+- **More broker adapters.** TraderLens is broker-agnostic by design.
+  IBKR is the first adapter, not the only intended one — the
+  annotation layer, pivot, and export schema are broker-neutral;
+  only the fetch + parse layer is per-broker. Adapters for other
+  brokers (`coinbase_sync`, `td_sync`, `binance_sync`, …) are
+  first-class welcome contributions.
+
+---
+
+## Status and limits
+
+This is **alpha-quality software for personal record-keeping**. Not
+financial advice. Not for automated trading. Always reconcile against
+your broker's own statements before treating any number here as
+truth.
+
+**By using TraderLens you accept the terms in [DISCLAIMER.md](DISCLAIMER.md)**
+— no warranty on data integrity, no liability for losses, and your
+responsibility to comply with your broker's terms and your local laws.
+
+v1 is tested against futures (NQ / MNQ / ES / MES) and stocks on a
+US paper account. Other instrument classes (options, FX, crypto,
+non-US markets) may produce incorrect results — the parser's
+field-coverage assumptions were tuned for what was observed there.
+
+---
+
+## Architecture (skim if curious)
+
+<details>
+<summary><strong>60-second architecture overview</strong></summary>
+
+```
+ Broker (Interactive Brokers today)
+        │
+        │  Flex Web Service — read-only, two-step poll
+        ▼
+ Fetcher (Python, stdlib + requests)
+        │
+        ▼
+ SQLite archive — every trade, idempotent
+        │
+        ├─▶ CSV export — schema-stable, machine-readable
+        │
+        └─▶ HTML pivot — one self-contained file for review
+```
+
+Three layers:
+
+- **Fact** — immutable, broker-given. `data/trades.sqlite`, written
+  only by the fetcher with `INSERT OR IGNORE`. Re-running is safe.
+- **Annotation** — user-owned. `data/annotations.csv`, you fill
+  `setup_tag` / `score` / `notes` in Excel; keyed by the opening
+  leg's trade ID so it survives re-fetches and re-pairings.
+- **Derived** — recomputable any time. The CSV exports and HTML
+  pivot are pure functions of *fact + annotation*; delete and
+  regenerate freely.
+
+Stack: Python 3.10+, `requests` (the only runtime dep), stdlib
+`xml.etree` for parsing, SQLite for storage. The HTML pivot inlines
+jQuery + PivotTable.js (MIT) so the report works offline.
+
+</details>
 
 ---
 
 ## License
 
-[AGPL-3.0](LICENSE). The author retains full copyright as the sole contributor; future dual-licensing remains an option pending a CLA. Network-use reciprocity (per AGPL §13) means a SaaS rehost would need to open-source its full stack. See [ADR-003](docs/decisions/003-license-agpl-3.0.md) for the full rationale.
+TraderLens is licensed under [AGPL-3.0](LICENSE). The author retains
+full copyright as the sole contributor; future dual-licensing
+remains an option pending a CLA. Network-use reciprocity (per AGPL
+§13) means a SaaS rehost would need to open-source its full stack.
+Background: [ADR-003](docs/decisions/003-license-agpl-3.0.md).
 
-**Third-party components** vendored in `assets/vendor/` (jQuery, jQuery UI, PivotTable.js) are MIT-licensed; full attribution in [assets/vendor/README.md](assets/vendor/README.md).
+Third-party assets vendored in `assets/vendor/` (jQuery, jQuery UI,
+PivotTable.js) are MIT-licensed; full attribution in
+[assets/vendor/README.md](assets/vendor/README.md).
+
+---
 
 ## See also
 
-- [DISCLAIMER.md](DISCLAIMER.md) — not financial advice, use at your own risk
-- [CONTRIBUTING.md](CONTRIBUTING.md) — how to file issues, branch/commit conventions, code review process
-- [CHANGELOG.md](CHANGELOG.md) — release notes (per [Keep a Changelog](https://keepachangelog.com/en/1.1.0/))
-
-*v1 — IBKR adapter. Updated 2026-05-28 (public release preparation).*
+- [DISCLAIMER.md](DISCLAIMER.md) — not financial advice, use at your
+  own risk.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to file issues, branch
+  and commit conventions, code review process.
+- [CHANGELOG.md](CHANGELOG.md) — release notes.
+- [docs/INDEX.md](docs/INDEX.md) — full documentation index
+  (operations, ADRs, study spikes).

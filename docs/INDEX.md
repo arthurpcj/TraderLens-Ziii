@@ -21,9 +21,6 @@ docs/
 
 | Document | Status | Purpose |
 |---|---|---|
-| [REQUIREMENTS.md](specs/REQUIREMENTS.md) | v1.1 frozen | Full requirements — scope / FR / NFR / failure handling / acceptance |
-| [INTERFACE_CONTRACT.md](specs/INTERFACE_CONTRACT.md) | 🎯 v1.1 frozen | 12-column CSV schema for the downstream MTS importer + cross-project commit SOP |
-| [DATA_ARCHITECTURE.md](specs/DATA_ARCHITECTURE.md) | v1.0 | Three-layer model (fact / annotation / derived) — ownership & mutability rules |
 | [SPEC_Code_Review.md](specs/SPEC_Code_Review.md) | v1.0 | Pre-implementation review template (acceptance criteria + risk gates) |
 
 ---
@@ -59,9 +56,7 @@ Pre-implementation verifications / proof-of-concept / field surveys. Naming conv
 | [003-license-agpl-3.0.md](decisions/003-license-agpl-3.0.md) | ✅ Accepted | License = AGPL-3.0 — network-use copyleft + author retains dual-licensing flexibility |
 
 **Planned**:
-- `004-csv-as-only-interface.md` (background already in INTERFACE_CONTRACT, to extract)
-- `005-signal-id-stays-in-mts.md` (same)
-- `006-multi-broker-naming.md` (TraderLens umbrella + per-broker adapter pattern)
+- `004-multi-broker-adapter-pattern.md` — TraderLens umbrella + per-broker adapter contract.
 
 ---
 
@@ -72,4 +67,4 @@ Pre-implementation verifications / proof-of-concept / field surveys. Naming conv
 
 ---
 
-*Last updated: 2026-05-28 (public release preparation)*
+*Last updated: 2026-05-29 (README revamp; integration-specific specs moved out of public docs).*

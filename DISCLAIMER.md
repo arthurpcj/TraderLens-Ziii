@@ -38,6 +38,36 @@ broker's statements. **Reconcile periodically against IBKR's own
 statements** — particularly P&L, commission, and trade counts. Do not
 treat TraderLens output as the authoritative record.
 
+## Data integrity and other software
+
+TraderLens reads from your broker over the network, writes local
+files (SQLite, CSV, HTML, logs), and you typically open those files
+in other software. The author makes **no warranty** about behaviour
+at any of those boundaries:
+
+- **Storage failures** — disk / filesystem corruption, accidental
+  deletion or overwrite, crashes during write (despite atomic-rename
+  safeguards), simultaneous TraderLens runs racing the same files.
+- **Excel and CSV tools** — silent type coercion of numeric strings,
+  locale-specific decimal separators, date reinterpretation. The CSV
+  may look "fixed" after Excel saves it but no longer match what
+  TraderLens wrote.
+- **File-sync clients** (OneDrive, Dropbox, iCloud, Google Drive)
+  may interact badly with the atomic-write pattern or version files
+  in ways that confuse the next run.
+- **Browsers** may render the HTML pivot incorrectly under unusual
+  zoom, theme, or extension settings.
+- **Antivirus / DLP software** may quarantine the venv or the
+  generated HTML.
+- **OS-level events** — power loss, sleep / hibernate races,
+  filesystem journal quirks.
+
+If anything downstream of TraderLens mangles your data, that is
+**not something this project can fix or be held liable for**. Treat
+`data/` like any other valuable folder: periodic backups, versioning,
+off-site copies. **Reconcile against your broker's own statements
+regularly.**
+
 ## Broker terms of service
 
 TraderLens uses **your own** IBKR Flex Web Service credentials (Token +
@@ -68,13 +98,13 @@ and own.
 
 ## Stocks / options / FX
 
-TraderLens v1 is scoped to futures (NQ / MNQ / ES / MES) for downstream
-CSV export, with stocks and other instruments archived to SQLite but not
+TraderLens v1 is scoped to futures (NQ / MNQ / ES / MES) for CSV
+export, with stocks and other instruments archived to SQLite but not
 exported. Behavior on assets outside this scope (options, FX, crypto,
-non-US futures) is **not tested** and may produce incorrect results. The
-field-coverage assumptions in `src/parser.py` reflect what was observed
-in a US futures paper account — other instrument classes may carry
-different field sets.
+non-US futures) is **not tested** and may produce incorrect results.
+The field-coverage assumptions in `src/parser.py` reflect what was
+observed in a US futures paper account — other instrument classes
+may carry different field sets.
 
 ## Jurisdiction
 
