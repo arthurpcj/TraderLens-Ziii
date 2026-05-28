@@ -1,12 +1,16 @@
-# TraderLens Demo Data
+# TraderLens demo bundle (advanced reference)
 
-A small anonymised SQLite + annotations bundle that lets you explore the
-end-to-end pipeline (CSV export + HTML pivot) **without an Interactive
-Brokers account**.
+The headline demo is the self-contained HTML file at the project
+root: **[`demo.html`](../demo.html)** — double-click to open. No
+setup, no Python, no broker account.
+
+This directory keeps the **raw bundle** the demo HTML was generated
+from, in case you want to inspect the data layer or re-run the
+pipeline yourself.
 
 ---
 
-## What's in the box
+## What's in here
 
 | File | Rows | Description |
 |---|---|---|
@@ -18,70 +22,54 @@ window, then mechanically transformed:
 
 - **MES position size ×8** (`quantity`, `ib_commission`,
   `fifo_pnl_realized` for trades; `ref_pnl_usd` in annotations).
-  This makes the equity curve more illustrative; the other underlyings
-  carry their original 1-lot paper sizes.
-- **`setup_tag` renamed** to generic identifiers (`setup_a`, `setup_b`)
-  — strategy naming is private.
-- No `account` field exists in the SQLite schema (Flex XML drops the
-  account ID at parse time), so no further scrubbing was needed.
+  This makes the equity curve more illustrative; the other
+  underlyings carry their original 1-lot paper sizes.
+- **`setup_tag` renamed** to generic identifiers (`setup_a`,
+  `setup_b`) — strategy naming is private.
+- No `account` field exists in the SQLite schema (Flex XML drops
+  the account ID at parse time), so no further scrubbing was needed.
 
 Everything else is verbatim: timestamps, prices, `orderReference`,
-commissions per lot, round-trip outcomes. The pipeline's behaviour on
-this bundle is representative of how it will behave on your own data.
+commissions per lot, round-trip outcomes. The pipeline's behaviour
+on this bundle is representative of how it behaves on real data.
 
 ---
 
-## How to view the demo
+## Re-running the pipeline against this bundle
 
-From the project root (Windows; adapt slashes on macOS / Linux):
+If you want to walk through `data/trades.sqlite + data/annotations.csv`
+→ `reports/pivot_latest.html` step by step:
+
+> ⚠ **Heads-up**: the steps below copy demo files into `data/`,
+> which is where the real pipeline writes too. If you've already
+> configured TraderLens with your broker token and have real trades
+> archived, **move your real data aside first**:
+>
+> - Windows: `move data data.real-backup`
+> - macOS / Linux: `mv data data.real-backup`
+>
+> Restore later by moving it back.
+
+From the project root:
 
 ```powershell
-# 1. Set up the env once
+# 1. Set up venv + deps (only needed once)
 python -m venv venv
-venv\Scripts\Activate.ps1
+venv\Scripts\Activate.ps1            # macOS / Linux: source venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Stage the demo data into where the code expects it
-#    (data/ is gitignored — these files don't ship in your fork until you copy them in)
-mkdir data 2>$null
-copy demo\trades.sqlite      data\trades.sqlite
-copy demo\annotations.csv    data\annotations.csv
+# 2. Stage the demo bundle into data/
+mkdir data 2>$null                   # macOS / Linux: mkdir -p data
+copy demo\trades.sqlite      data\trades.sqlite       # macOS / Linux: cp demo/trades.sqlite data/
+copy demo\annotations.csv    data\annotations.csv     # macOS / Linux: cp demo/annotations.csv data/
 
-# 3. Export the CSV for the latest demo date
+# 3. Regenerate the CSV export and HTML pivot
 venv\Scripts\python.exe -m src.exporter --date 2026-05-19
-
-# 4. Generate the self-contained HTML pivot
 venv\Scripts\python.exe -m src.pivot
 
-# 5. Open it in your browser
-start reports\pivot.html
+# 4. Open the result
+start reports\pivot_latest.html      # macOS: open; Linux: xdg-open
 ```
 
-The HTML is a single file — open it offline, send it as an attachment,
-diff it against another run. No server, no dependencies.
-
----
-
-## How this differs from a real run
-
-| | Demo | Real |
-|---|---|---|
-| Data source | This directory (offline) | IBKR Flex Web Service (live) |
-| Account credentials needed | No | Yes (`.env`: token + query ID) |
-| Number of trades | 50 (fixed) | Whatever your account has |
-| Re-fetching adds data | No | Yes — `INSERT OR IGNORE` idempotent |
-| Rate limits apply | No (no network) | Yes — see [ADR-002](../docs/decisions/002-flex-rate-limit-policy.md) |
-
----
-
-## How the demo was generated
-
-The bundle is produced by an author-only one-shot script that reads the
-real (gitignored) SQLite + annotations and applies the transformations
-above. The script itself is not part of the public repo — public users
-consume the output here.
-
-If you want to swap in your **own** data instead of the demo, just run
-the real pipeline (`python -m src.ib_sync` after configuring `.env`);
-the resulting `data/trades.sqlite` becomes the input to steps 3 + 4
-above.
+The HTML in `reports/pivot_latest.html` should match the headline
+[`demo.html`](../demo.html) modulo timestamps in the footer.
