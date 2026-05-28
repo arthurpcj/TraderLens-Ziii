@@ -54,7 +54,7 @@ if (-not $isAdmin) {
 $TaskName  = 'TraderLens IB Sync'
 # ONE task drives both Flex queries via `--mode auto`; the Python picks mode by
 # real NY time + state (so DST drift is harmless): past NY close & today's
-# Confirmation not yet captured -> Confirmation (same-day, primary MTS feed);
+# Confirmation not yet captured -> Confirmation (same-day, primary feed);
 # at the Activity slot (NY >=20) & Confirmation already in -> Activity (T+1
 # backup/reconcile); otherwise -> skip (no Flex call).
 #
@@ -123,7 +123,7 @@ try {
         -Trigger (@($tLogon) + $tDailies) `
         -Settings $settings `
         -Principal $principal `
-        -Description 'TraderLens IBKR Flex sync (--mode auto): same-day Trade Confirmation (primary MTS feed) + T+1 Activity (backup/reconcile). Rate-limit-safe: Python gate caps Flex calls at <=2/day; no auto-retry.' `
+        -Description 'TraderLens IBKR Flex sync (--mode auto): same-day Trade Confirmation (primary) + T+1 Activity (backup/reconcile). Rate-limit-safe: Python gate caps Flex calls at <=2/day; no auto-retry.' `
         -ErrorAction Stop | Out-Null
 } catch {
     Write-Host "`n[FAILED] Could not register task: $($_.Exception.Message)" -ForegroundColor Red
