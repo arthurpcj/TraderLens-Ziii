@@ -63,6 +63,9 @@ data/
 # Generated pivot reports (contain real trades — private)
 /reports/
 
+# Demo pivot preview output (regenerated from demo/ by run_demo_pivot.py)
+demo/_out/
+
 # Raw Flex response dumps captured during spikes (may contain real trades — private)
 docs/studies/**/raw_*.xml
 

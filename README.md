@@ -12,6 +12,31 @@ filter-linked, all offline, no server.
 *Screenshot from the bundled [demo data](demo/) — 50 anonymised
 trades.*
 
+<details>
+<summary><strong>More screenshots</strong> — equity curve · calendar heatmap · by-setup scoring · pivot · detail table</summary>
+
+### Equity curve
+
+![equity curve](assets/screenshots/02-equity-curve.png)
+
+### Calendar heatmap
+
+![calendar heatmap](assets/screenshots/03-calendar.png)
+
+### By-setup scoring
+
+![by-setup scoring](assets/screenshots/04-by-setup.png)
+
+### Pivot table (Setup × Class slice)
+
+![pivot table](assets/screenshots/05-pivot.png)
+
+### Detail table (filter-linked)
+
+![detail table](assets/screenshots/06-detail.png)
+
+</details>
+
 ---
 
 ## Who is this for?
@@ -62,31 +87,6 @@ Five views, all rendered into one self-contained HTML file
 - **Pivot + detail table** — drag-and-drop pivot (PivotTable.js) plus
   a sortable / filterable trade list, both reacting to the same
   filter state.
-
-<details>
-<summary><strong>More screenshots</strong> — equity / calendar / by-setup / pivot / detail</summary>
-
-### Equity curve
-
-![equity curve](assets/screenshots/02-equity-curve.png)
-
-### Calendar heatmap
-
-![calendar heatmap](assets/screenshots/03-calendar.png)
-
-### By-setup scoring
-
-![by-setup scoring](assets/screenshots/04-by-setup.png)
-
-### Pivot table (default = EntryHour × Result)
-
-![pivot table](assets/screenshots/05-pivot.png)
-
-### Detail table (filter-linked)
-
-![detail table](assets/screenshots/06-detail.png)
-
-</details>
 
 > Live version: [`demo.html`](demo.html) at the project root —
 > just double-click.

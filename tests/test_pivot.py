@@ -124,3 +124,62 @@ def test_build_html_empty_is_safe():
     html = pivot.build_html([], stats)
     assert "var DATA = []" in html
     assert "No closed round-trips to plot." in html  # equity-curve empty guard
+
+
+def test_build_html_header_two_column_no_notices():
+    """Header is a two-column bar (filters left, brand right). The old notices
+    aside — FIFO Pairing-edges note + small-sample warning — was removed, so it
+    must not render even when there ARE unmatched/still-open legs (which used to
+    trigger the Pairing-edges note)."""
+    rt = _rt("2026-05-20", "2026-05-20", 50, tid="E1")
+    stats = {"round_trips": 1, "unmatched_close_qty": 3, "still_open_qty": 2}
+    html = pivot.build_html([rt], stats)
+    for token in ['class="header-bar"', 'class="filters"', 'class="brand"']:
+        assert token in html, f"missing new header token: {token}"
+    for gone in ['class="page-header"', 'class="topbar"', 'id="sampleWarn"',
+                 "Pairing edges", "sample-warn", "small sample"]:
+        assert gone not in html, f"removed structure leaked back: {gone}"
+
+
+# --- read-only generation (demo never mutates its snapshot DB) ---
+
+def test_connect_read_only_blocks_writes(tmp_path):
+    """A read_only connection must reject writes — the guarantee behind 'demo
+    generation never mutates the snapshot DB'."""
+    import sqlite3
+
+    from src import sqlite_store
+    db = tmp_path / "t.sqlite"
+    c = sqlite_store.connect(str(db))
+    sqlite_store.init_schema(c)
+    c.close()
+    ro = sqlite_store.connect(str(db), read_only=True)
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            ro.execute("INSERT INTO trades(trade_id) VALUES('x')")
+            ro.commit()
+    finally:
+        ro.close()
+
+
+def test_generate_read_only_uses_ann_path_and_leaves_db_untouched(tmp_path):
+    """generate(read_only=True, ann_path=...) builds the report from a fixed
+    snapshot without mutating the .sqlite, and honours the given annotations
+    path (the --annotations flag used to be ignored for HTML generation)."""
+    from src import sqlite_store
+    db = tmp_path / "t.sqlite"
+    conn = sqlite_store.connect(str(db))
+    sqlite_store.init_schema(conn)
+    sqlite_store.upsert_trades(conn, [
+        _leg("O", "2026-05-20", "10:00:00", "BUY", 1, 100.0, "O"),
+        _leg("Oc", "2026-05-20", "10:30:00", "SELL", -1, 110.0, "C"),
+    ])
+    conn.commit()
+    conn.close()
+    snapshot = db.read_bytes()
+    out = tmp_path / "out.html"
+    ann = tmp_path / "missing.csv"   # absent -> load_annotations returns {}
+    out_path, stats = pivot.generate(db_path=db, out=out, ann_path=ann, read_only=True)
+    assert out_path.exists() and "var DATA" in out.read_text(encoding="utf-8")
+    assert stats["round_trips"] == 1
+    assert db.read_bytes() == snapshot   # read-only build did not mutate the DB
