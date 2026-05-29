@@ -46,7 +46,21 @@ For Flex Web Service rate-limit issues specifically, please read
 
 ## Development setup
 
-Requires Python 3.10+. On Windows:
+Requires Python 3.10+. Works on Windows, macOS, and Linux — CI runs
+pytest on all three (3 OS × 3 Python versions).
+
+**macOS / Linux**:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# edit .env to fill IBKR_FLEX_TOKEN + IBKR_FLEX_QUERY_ID (optional for tests)
+pytest -q
+```
+
+**Windows (PowerShell)**:
 
 ```powershell
 python -m venv venv

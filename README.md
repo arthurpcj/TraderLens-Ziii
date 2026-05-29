@@ -108,21 +108,28 @@ their read-only Flex Web Service.
    ```
    `.env` is gitignored — never gets committed.
 
-**Daily use (Windows)** — **double-click [`scripts\run_ib_sync.bat`](scripts/run_ib_sync.bat)**.
-That's it. It fetches, archives, and rewrites the CSV. On macOS /
-Linux for now, run the underlying command directly:
-`venv/bin/python -m src.ib_sync` (a `.sh` wrapper is a welcome
-contribution).
+**Daily use** — one script per platform, both fetch + archive + rewrite the CSV:
 
-To make it fully automatic (Windows runs it at logon + a few times
-a day, with the rate-limit gate handling everything):
+- **Windows** — double-click [`scripts\run_ib_sync.bat`](scripts/run_ib_sync.bat)
+- **macOS / Linux** — `bash scripts/run_ib_sync.sh` (already executable; or `./scripts/run_ib_sync.sh`)
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\register_ib_sync_task.ps1
-```
+**Make it automatic** (so you mostly forget about it):
 
-After that you mostly forget about it. The HTML pivot gets refreshed
-by running `scripts\review.bat` when you want to annotate / re-score.
+- **Windows** — register a Windows Task Scheduler entry:
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File scripts\register_ib_sync_task.ps1
+  ```
+- **macOS** — install a launchd agent:
+  ```bash
+  bash scripts/install-launchd-task.sh
+  ```
+- **Linux** — `cron` / `systemd` timer / `anacron` — your pick. Run
+  `scripts/run_ib_sync.sh --no-delay --mode auto` on your preferred
+  schedule. (A cron one-liner that fires every 4 hours:
+  `0 */4 * * * /path/to/scripts/run_ib_sync.sh --no-delay --mode auto`.)
+
+The HTML pivot gets refreshed when you want to annotate / re-score:
+**Windows** — `scripts\review.bat`; **macOS / Linux** — `bash scripts/review.sh`.
 
 Full operations manual (logs, exit codes, troubleshooting, all the
 commands): [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md).
