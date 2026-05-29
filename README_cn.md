@@ -9,6 +9,31 @@
 
 *截图来自内置的 [demo 数据](demo/)——50 笔成交。*
 
+<details>
+<summary><strong>更多截图</strong> — 资金曲线 · 日历热力图 · 按交易模式打分 · 透视 · 明细表</summary>
+
+### 资金曲线
+
+![资金曲线](assets/screenshots/02-equity-curve.png)
+
+### 日历热力图
+
+![日历热力图](assets/screenshots/03-calendar.png)
+
+### 按交易模式打分
+
+![按交易模式打分](assets/screenshots/04-by-setup.png)
+
+### 透视表(Setup × Class 切片)
+
+![透视表](assets/screenshots/05-pivot.png)
+
+### 明细表(联动筛选)
+
+![明细表](assets/screenshots/06-detail.png)
+
+</details>
+
 ---
 
 ## 给谁用的?
@@ -55,31 +80,6 @@ Brokers,欢迎接入更多),未来就都能接入。
 - **按交易模式打分** — 你标的每个策略,实际跑出来什么成绩。
 - **透视 + 明细表** — 拖拽式透视(PivotTable.js),配一张能排序、
   能筛的成交清单,两边都跟着同一套筛选条件联动。
-
-<details>
-<summary><strong>更多截图</strong> — 资金 / 日历 / 按交易模式 / 透视 / 明细</summary>
-
-### 资金曲线
-
-![资金曲线](assets/screenshots/02-equity-curve.png)
-
-### 日历热力图
-
-![日历热力图](assets/screenshots/03-calendar.png)
-
-### 按交易模式打分
-
-![按交易模式打分](assets/screenshots/04-by-setup.png)
-
-### 透视表(默认 = EntryHour × Result)
-
-![透视表](assets/screenshots/05-pivot.png)
-
-### 明细表(联动筛选)
-
-![明细表](assets/screenshots/06-detail.png)
-
-</details>
 
 > 在线版本就是项目根目录那个 [`demo.html`](demo.html)——双击即可。
 
