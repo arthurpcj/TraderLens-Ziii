@@ -124,3 +124,18 @@ def test_build_html_empty_is_safe():
     html = pivot.build_html([], stats)
     assert "var DATA = []" in html
     assert "No closed round-trips to plot." in html  # equity-curve empty guard
+
+
+def test_build_html_header_two_column_no_notices():
+    """Header is a two-column bar (filters left, brand right). The old notices
+    aside — FIFO Pairing-edges note + small-sample warning — was removed, so it
+    must not render even when there ARE unmatched/still-open legs (which used to
+    trigger the Pairing-edges note)."""
+    rt = _rt("2026-05-20", "2026-05-20", 50, tid="E1")
+    stats = {"round_trips": 1, "unmatched_close_qty": 3, "still_open_qty": 2}
+    html = pivot.build_html([rt], stats)
+    for token in ['class="header-bar"', 'class="filters"', 'class="brand"']:
+        assert token in html, f"missing new header token: {token}"
+    for gone in ['class="page-header"', 'class="topbar"', 'id="sampleWarn"',
+                 "Pairing edges", "sample-warn", "small sample"]:
+        assert gone not in html, f"removed structure leaked back: {gone}"

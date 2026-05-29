@@ -93,17 +93,10 @@ _PAGE_CSS = """
  .kpi-grid .card-xl{height:100%;display:flex;flex-direction:column;justify-content:center}
  .kpi-grid .card-xl .v{font-size:42px}
 
- /* Top-right notices aside — small, neutral, never fights the headline. */
- .page-header{display:flex;justify-content:space-between;align-items:flex-start;
-   gap:24px;flex-wrap:wrap;margin-bottom:8px}
- .title-block{flex:1 1 280px;min-width:0}
- .notices{display:flex;flex-direction:column;gap:4px;max-width:380px;font-size:11px}
- .notices:empty{display:none}
- .data-note{background:#f6f7f8;border:1px solid #dde1e6;border-radius:4px;
-   padding:5px 10px;color:#666;line-height:1.4}
- .data-note b{color:#444;font-weight:600}
- .sample-warn{background:#fffaf2;border:1px solid #f0d8a8;border-left:3px solid #c2792e;
-   border-radius:4px;padding:5px 10px;color:#7a5520;line-height:1.4}
+ /* Brand block — right column of the header bar; never fights the filters. */
+ .brand{flex:0 1 auto;text-align:right;min-width:0}
+ .brand h1{margin:0;font-size:19px;line-height:1.2}
+ .brand .meta{font-size:11px;color:#888;margin-top:3px}
 
  .pos{color:#2b6cb0} .neg{color:#c2792e}
  table.grid{border-collapse:collapse;margin:8px 0;font-size:13px}
@@ -115,18 +108,20 @@ _PAGE_CSS = """
  .warn{background:#fbf6ec;border:1px solid #e7d6b0;border-radius:6px;padding:8px 12px;font-size:12px;margin:8px 0}
  .muted{color:#999}
 
- /* sticky top bar (Tier-1 #1) — bleeds to body padding edges. */
- .topbar{position:sticky;top:0;background:#fdfdfd;border-bottom:1px solid #e5e5e5;
-   padding:8px 24px;margin:8px -24px 16px -24px;z-index:100;
-   box-shadow:0 1px 3px rgba(0,0,0,0.04);font-size:12px;color:#444}
- .topbar .range-info{margin-bottom:4px}
- .topbar #rangeLabel{font-weight:600;color:#222}
- .topbar .controls{margin-top:4px}
- .topbar .controls select{font-size:12px;margin:0 4px}
- .topbar .controls button{font-size:12px;margin:0 2px;padding:1px 6px}
- .topbar .controls input[type=date]{font-size:11px;padding:1px 4px;border:1px solid #ccc;border-radius:3px;margin:0 2px}
- .topbar .controls label{margin:0 4px}
- .topbar .controls .sep{color:#ccc;margin:0 4px}
+ /* sticky header bar (Tier-1 #1) — filters left, brand right; bleeds to edges. */
+ .header-bar{position:sticky;top:0;background:#fdfdfd;border-bottom:1px solid #e5e5e5;
+   padding:8px 24px;margin:0 -24px 16px -24px;z-index:100;
+   box-shadow:0 1px 3px rgba(0,0,0,0.04);font-size:12px;color:#444;
+   display:flex;justify-content:space-between;align-items:flex-start;gap:24px;flex-wrap:wrap}
+ .header-bar .filters{flex:1 1 460px;min-width:0}
+ .header-bar .range-info{margin-bottom:4px}
+ .header-bar #rangeLabel{font-weight:600;color:#222}
+ .header-bar .controls{margin-top:4px}
+ .header-bar .controls select{font-size:12px;margin:0 4px}
+ .header-bar .controls button{font-size:12px;margin:0 2px;padding:1px 6px}
+ .header-bar .controls input[type=date]{font-size:11px;padding:1px 4px;border:1px solid #ccc;border-radius:3px;margin:0 2px}
+ .header-bar .controls label{margin:0 4px}
+ .header-bar .controls .sep{color:#ccc;margin:0 4px}
 
  /* Tier-1 #5 preset chips. Active chip filled blue (matches POS color). */
  .chips{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0 4px}
@@ -198,7 +193,8 @@ _PAGE_CSS = """
  }
  @media (max-width: 700px){
    body{padding:0 14px;margin:14px auto}
-   .topbar{padding:8px 14px;margin:8px -14px 14px -14px}
+   .header-bar{padding:8px 14px;margin:0 -14px 14px -14px}
+   .brand{text-align:left;flex-basis:100%}
    .cards-primary{grid-template-columns:repeat(2, 1fr);gap:8px}
    .cards-secondary{grid-template-columns:repeat(2, 1fr);gap:6px}
    .kpi-grid{grid-template-columns:1fr}
@@ -478,22 +474,6 @@ _APP_JS = r"""
       return "<div class='" + cls_ + "'>" + items.map(function(c){return card(c[0],c[1]);}).join('') + "</div>";
     }
 
-    // Sample-size warning lives in the top-right notices aside (NOT in the
-    // headline block) so it doesn't steal vertical space from Net P&L on
-    // wide screens. Threshold = 30 (loose enough to flag early, strict
-    // enough to suppress noise on very-small N).
-    var warnEl = $sel('sampleWarn');
-    if(warnEl){
-      if(k.n_closed > 0 && k.n_closed < 30){
-        warnEl.innerHTML = "<div class='sample-warn' title='small-sample caveat'>" +
-          "⚠ small sample (n=" + k.n_closed +
-          ") — PF / Win% / R:R are volatile below ~30 RT; treat as directional, not precise." +
-          "</div>";
-      } else {
-        warnEl.innerHTML = '';
-      }
-    }
-
     // Headline: just the dollars. Big.
     var headline = "<div class='cards-headline'><div class='card-xl'>" +
       "<div class='k'>Net P&L</div>" +
@@ -539,7 +519,7 @@ _APP_JS = r"""
   function renderEquityCurve(k){
     var cum = k.cum, closed = k.closed;
     if(!cum.length){ $sel('equityCurve').innerHTML = "<p class='muted'>No closed round-trips to plot.</p>"; return; }
-    var w=860, h=260, padx=56, pady=22, iw=w-2*padx, ih=h-2*pady, n=cum.length;
+    var w=1180, h=300, padx=56, pady=22, iw=w-2*padx, ih=h-2*pady, n=cum.length;
     var lo = Math.min(0, Math.min.apply(null, cum));
     var hi = Math.max(0, Math.max.apply(null, cum));
     var span = (hi - lo) || 1;
@@ -1071,16 +1051,6 @@ def build_html(rts: list[RoundTrip], stats: dict,
                            "dims": list(_PIVOT_DIMS)})
     # New York time, English tz abbrev (EDT/EST) — report is English-only.
     gen = datetime.now(timezone.utc).astimezone(ET_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
-    dq = ""
-    if stats["unmatched_close_qty"] or stats["still_open_qty"]:
-        # Neutral informational disclosure of FIFO-pairing edge effects — these
-        # are legs the round-trip math couldn't pair within the data window,
-        # NOT errors. Compact wording for the top-right notice box.
-        dq = (f"<div class='data-note' "
-              f"title='FIFO pairing edges — round-trip stats exclude these legs'>"
-              f"<b>Pairing edges</b>: {stats['still_open_qty']} still open · "
-              f"{stats['unmatched_close_qty']} closes opened before this window."
-              f"</div>")
     css = _read_vendor("pivot.min.css")
     jq = _read_vendor("jquery.min.js")
     jqui = _read_vendor("jquery-ui.min.js")
@@ -1091,40 +1061,35 @@ def build_html(rts: list[RoundTrip], stats: dict,
 <title>TraderLens — Trade Analytics</title>
 <style>{css}</style>
 <style>{_PAGE_CSS}</style></head><body>
-<header class="page-header">
-  <div class="title-block">
+<div class="header-bar" role="region" aria-label="global filter">
+  <div class="filters">
+    <div class="range-info"><span id="rangeLabel">Range: —</span></div>
+    <div class="chips" id="presetChips">
+      <button class="chip" data-preset="today">Today</button>
+      <button class="chip" data-preset="this-week">This week</button>
+      <button class="chip" data-preset="last-week">Last week</button>
+      <button class="chip" data-preset="this-month">This month</button>
+      <button class="chip" data-preset="last-month">Last month</button>
+      <button class="chip" data-preset="last-30">Last 30d</button>
+      <button class="chip" data-preset="ytd">YTD</button>
+      <button class="chip" data-preset="all">All</button>
+    </div>
+    <div class="controls">
+      Setup <select id="fSetup"></select>
+      Class <select id="fClass"></select>
+      <span class="sep">·</span>
+      <label>from <input type="date" id="fFrom"></label>
+      <label>to <input type="date" id="fTo"></label>
+      <span class="sep">·</span>
+      <button id="rangePrev" type="button" title="shift window back by its own width">←</button>
+      <button id="rangeNext" type="button" title="shift window forward by its own width">→</button>
+      <button id="fReset" type="button">reset</button>
+    </div>
+  </div>
+  <div class="brand">
     <h1>TraderLens — Trade Analytics</h1>
     <div class="meta">generated {gen} (New York) · neutral colors:
      <span class="pos">▲ blue = profit</span> · <span class="neg">▼ amber = loss</span></div>
-  </div>
-  <aside class="notices" aria-label="advisory notices">
-    {dq}
-    <div id="sampleWarn"></div>
-  </aside>
-</header>
-
-<div class="topbar" role="region" aria-label="global filter">
-  <div class="range-info"><span id="rangeLabel">Range: —</span></div>
-  <div class="chips" id="presetChips">
-    <button class="chip" data-preset="today">Today</button>
-    <button class="chip" data-preset="this-week">This week</button>
-    <button class="chip" data-preset="last-week">Last week</button>
-    <button class="chip" data-preset="this-month">This month</button>
-    <button class="chip" data-preset="last-month">Last month</button>
-    <button class="chip" data-preset="last-30">Last 30d</button>
-    <button class="chip" data-preset="ytd">YTD</button>
-    <button class="chip" data-preset="all">All</button>
-  </div>
-  <div class="controls">
-    Setup <select id="fSetup"></select>
-    Class <select id="fClass"></select>
-    <span class="sep">·</span>
-    <label>from <input type="date" id="fFrom"></label>
-    <label>to <input type="date" id="fTo"></label>
-    <span class="sep">·</span>
-    <button id="rangePrev" type="button" title="shift window back by its own width">←</button>
-    <button id="rangeNext" type="button" title="shift window forward by its own width">→</button>
-    <button id="fReset" type="button">reset</button>
   </div>
 </div>
 
