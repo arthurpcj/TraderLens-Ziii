@@ -70,9 +70,12 @@ docs/studies/**/raw_*.xml
 # Personal workflow content not intended for public contributors.
 /_private/
 
-# Chinese docs are LOCAL ONLY — never published to GitHub. Convention:
+# Chinese docs are LOCAL ONLY by default — never published to GitHub. Convention:
 # English doc = canonical, no suffix (e.g. OPERATIONS.md); Chinese = same name + _cn.
+# Exception: README_cn.md ships to GitHub (bilingual front page, link-switched
+# with README.md). Keep it in lockstep with the English README on every change.
 *_cn.md
+!README_cn.md
 
 # Testing
 .pytest_cache/

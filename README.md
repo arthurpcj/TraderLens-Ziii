@@ -1,5 +1,7 @@
 # TraderLens
 
+**English** · [中文](README_cn.md)
+
 **See your trading patterns clearly.** Turn your broker's trade
 history into a single self-contained HTML report — equity curve,
 calendar heatmap, per-setup scoring, drill-down detail — all
@@ -7,7 +9,7 @@ filter-linked, all offline, no server.
 
 ![TraderLens HTML pivot — overview](assets/screenshots/01-overview.png)
 
-*Screenshot from the bundled [demo data](demo/) — 50 anonymised paper
+*Screenshot from the bundled [demo data](demo/) — 50 anonymised
 trades.*
 
 ---
@@ -33,7 +35,7 @@ questions in a single HTML file you can open in any browser, offline.
 **Double-click [`demo.html`](demo.html)** — that's it.
 
 It's a self-contained HTML file (~440 KB, jQuery + PivotTable.js
-inlined) generated from 50 anonymised paper trades. Opens in any
+inlined) generated from 50 anonymised trades. Opens in any
 browser on any OS, works offline, runs no code, touches no other
 file on your machine.
 
