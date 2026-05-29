@@ -55,8 +55,19 @@ class UpsertStats:
     ignored_dupes: int
 
 
-def connect(db_path: str | Path) -> sqlite3.Connection:
-    """Open a connection (WAL, Row factory). Use ':memory:' for tests."""
+def connect(db_path: str | Path, *, read_only: bool = False) -> sqlite3.Connection:
+    """Open a connection (WAL, Row factory). Use ':memory:' for tests.
+
+    read_only=True opens the file via a mode=ro URI: no parent mkdir, no WAL
+    switch, no checkpoint — so the .sqlite file is never mutated on disk. Use
+    it for read-only consumers (e.g. building a report from a fixed snapshot,
+    like the demo) that must not touch the DB.
+    """
+    if read_only and db_path != ":memory:":
+        uri = f"{Path(db_path).resolve().as_uri()}?mode=ro"
+        conn = sqlite3.connect(uri, uri=True)
+        conn.row_factory = sqlite3.Row
+        return conn
     if db_path != ":memory:":
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)

@@ -1127,15 +1127,18 @@ def build_html(rts: list[RoundTrip], stats: dict,
 </body></html>"""
 
 
-def generate(db_path: str | Path = SQLITE_PATH, out: str | Path = DEFAULT_OUT) -> tuple[Path, dict]:
-    conn = sqlite_store.connect(str(db_path))
+def generate(db_path: str | Path = SQLITE_PATH, out: str | Path = DEFAULT_OUT,
+             ann_path: str | Path = ANNOTATIONS_PATH, *,
+             read_only: bool = False) -> tuple[Path, dict]:
+    conn = sqlite_store.connect(str(db_path), read_only=read_only)
     try:
-        sqlite_store.init_schema(conn)  # idempotent: migrate DBs predating order_ref
+        if not read_only:
+            sqlite_store.init_schema(conn)  # migrate only when we own the DB (writes)
         rows = sqlite_store.query_all(conn)
     finally:
         conn.close()
     rts, stats = pair_round_trips(rows)
-    anns = annotations.load_annotations()
+    anns = annotations.load_annotations(ann_path)
     cfg = annotations.load_tag_config()
     out_path = Path(out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1272,7 +1275,7 @@ def main(argv: list[str] | None = None) -> int:
         return review_flow(args.db, args.annotations, args.out,
                            lookback=lookback, export_dir=args.export_dir)
 
-    out_path, stats = generate(args.db, args.out)
+    out_path, stats = generate(args.db, args.out, args.annotations)
     print(f"[OK] {stats['legs']} legs -> {stats['round_trips']} round-trips "
           f"({stats['unmatched_close_qty']} unmatched-close, {stats['still_open_qty']} still-open)")
     print(f"[OK] report -> {out_path}")
