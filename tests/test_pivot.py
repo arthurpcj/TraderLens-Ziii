@@ -271,3 +271,75 @@ def test_build_html_wires_csv_export_button():
     html = pivot.build_html([rt], stats)
     assert 'id="detailExport"' in html          # the button exists
     assert "exportDetailCsv" in html and "function toCSV" in html   # wired + mirror present
+
+
+# --- calendar windowed viewport (Tier-2, FR-PIVOT-8): Python source of truth
+# for the bounded N-month viewport + gentle re-anchor rule. JS mirror
+# (calWindow/resolveAnchor) verified visually. ---
+
+def test_calendar_window_recent_n_months():
+    w = pivot._calendar_window("2026-06", 3, "2025-01", "2026-06")
+    assert w["months"] == ["2026-04", "2026-05", "2026-06"]
+    assert w["has_next"] is False        # anchor at the data's max month
+    assert w["has_prev"] is True         # older data exists
+
+
+def test_calendar_window_crosses_year_boundary():
+    w = pivot._calendar_window("2026-01", 3, "2024-01", "2026-06")
+    assert w["months"] == ["2025-11", "2025-12", "2026-01"]
+
+
+def test_calendar_window_clamps_at_oldest_edge():
+    # anchor at min: prev arrow dead, window shows leading empty pre-data months
+    w = pivot._calendar_window("2025-01", 3, "2025-01", "2026-06")
+    assert w["months"] == ["2024-11", "2024-12", "2025-01"]
+    assert w["has_prev"] is False and w["has_next"] is True
+
+
+def test_calendar_window_single_column_and_short_history():
+    assert pivot._calendar_window("2026-03", 1, "2026-01", "2026-06")["months"] == ["2026-03"]
+    # data shorter than cols -> window padded with leading empty months
+    w = pivot._calendar_window("2026-03", 4, "2026-02", "2026-03")
+    assert w["months"] == ["2025-12", "2026-01", "2026-02", "2026-03"]
+
+
+def test_calendar_window_empty_extent_is_safe():
+    w = pivot._calendar_window(None, 3, None, None)
+    assert w == {"months": [], "has_prev": False, "has_next": False}
+
+
+def test_resolve_anchor_unbounded_all_stays_put():
+    # switching to "All" (no `to`) must NOT move the viewport
+    assert pivot._resolve_anchor("2026-03", None, 3, "2025-01", "2026-06") == "2026-03"
+    # ...but with no current anchor yet (initial load) fall back to most-recent
+    assert pivot._resolve_anchor(None, None, 3, "2025-01", "2026-06") == "2026-06"
+
+
+def test_resolve_anchor_gentle_when_filter_month_already_visible():
+    # filter.to month is inside the current viewport -> don't move (gentle rule)
+    assert pivot._resolve_anchor("2026-06", "2026-05-10", 3, "2025-01", "2026-06") == "2026-06"
+
+
+def test_resolve_anchor_jumps_when_filter_month_offscreen():
+    # filter.to month not visible -> re-anchor right edge to it
+    assert pivot._resolve_anchor("2026-06", "2026-01-10", 3, "2025-01", "2026-06") == "2026-01"
+
+
+def test_resolve_anchor_clamps_filter_outside_data_extent():
+    # filter far in the future -> clamp target into [min,max]; here that target
+    # (max month) is already visible, so the viewport stays put
+    assert pivot._resolve_anchor("2026-06", "2030-01-10", 3, "2025-01", "2026-06") == "2026-06"
+
+
+def test_resolve_anchor_no_data_returns_none():
+    assert pivot._resolve_anchor(None, "2026-01-10", 3, None, None) is None
+
+
+def test_build_html_wires_calendar_viewport():
+    rt = _rt("2026-05-20", "2026-05-20", 50, tid="E1")
+    stats = {"round_trips": 1, "unmatched_close_qty": 0, "still_open_qty": 0}
+    html = pivot.build_html([rt], stats)
+    # viewport arrows present + wired view-only (pageCal), and the JS mirrors exist
+    assert 'id="calPrev"' in html and 'id="calNext"' in html
+    assert "function pageCal" in html and "function calWindow" in html and "function resolveAnchor" in html
+    assert "filteredNoDate" in html        # calendar decoupled from the date filter
