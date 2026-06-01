@@ -132,18 +132,15 @@ _PAGE_CSS = """
  .chip:hover{background:#f0f0f0}
  .chip.active{background:#2b6cb0;color:#fff;border-color:#2b6cb0}
 
- /* Calendar — flex-wrap, default 3 months per row (user-pickable 1/2/3/4).
-    Cell width scales up as months-per-row goes down so fewer columns means
-    individual months get more breathing room. data-cols="N" attribute on
-    .cal-wrap (set by renderCal from `calCols`) drives the size variants.
-    6 weekday columns now (Mon-Fri + Sun, no Saturday), so max-widths are
-    tighter than the phase-1 7-col version. */
- .cal-wrap{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start;
-   max-width:1060px}    /* default = 3 cols (matches [data-cols="3"] below) */
- .cal-wrap[data-cols="1"]{max-width:620px}
- .cal-wrap[data-cols="2"]{max-width:900px}
- .cal-wrap[data-cols="3"]{max-width:1060px}
- .cal-wrap[data-cols="4"]{max-width:1180px}
+ /* Calendar — FR-PIVOT-8: the viewport is exactly `calCols` months and renders
+    as a SINGLE row (no wrap). Cell width scales up as months-per-row goes down
+    so fewer columns get more breathing room; data-cols="N" on .cal-wrap (set by
+    renderCal from `calCols`) drives the size variants. overflow-x:auto lets a
+    wide window (cols=4) or a narrow screen scroll instead of wrapping — the old
+    flex-wrap + max-width caps wrapped the 3rd month onto a 2nd row once a full
+    3-month window exceeded the cap. 6 weekday columns (Mon-Fri + Sun, no Sat). */
+ .cal-wrap{display:flex;flex-wrap:nowrap;gap:18px;align-items:flex-start;
+   overflow-x:auto}
  .cal-wrap[data-cols="1"] .cal td,.cal-wrap[data-cols="1"] .cal th{width:100px;height:80px}
  .cal-wrap[data-cols="1"] .cal .dn{font-size:13px}
  .cal-wrap[data-cols="1"] .cal .dp{font-size:15px}

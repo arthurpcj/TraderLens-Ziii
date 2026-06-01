@@ -49,17 +49,10 @@
  .kpi-grid .card-xl{height:100%;display:flex;flex-direction:column;justify-content:center}
  .kpi-grid .card-xl .v{font-size:42px}
 
- /* Top-right notices aside — small, neutral, never fights the headline. */
- .page-header{display:flex;justify-content:space-between;align-items:flex-start;
-   gap:24px;flex-wrap:wrap;margin-bottom:8px}
- .title-block{flex:1 1 280px;min-width:0}
- .notices{display:flex;flex-direction:column;gap:4px;max-width:380px;font-size:11px}
- .notices:empty{display:none}
- .data-note{background:#f6f7f8;border:1px solid #dde1e6;border-radius:4px;
-   padding:5px 10px;color:#666;line-height:1.4}
- .data-note b{color:#444;font-weight:600}
- .sample-warn{background:#fffaf2;border:1px solid #f0d8a8;border-left:3px solid #c2792e;
-   border-radius:4px;padding:5px 10px;color:#7a5520;line-height:1.4}
+ /* Brand block — right column of the header bar; never fights the filters. */
+ .brand{flex:0 1 auto;text-align:right;min-width:0}
+ .brand h1{margin:0;font-size:19px;line-height:1.2}
+ .brand .meta{font-size:11px;color:#888;margin-top:3px}
 
  .pos{color:#2b6cb0} .neg{color:#c2792e}
  table.grid{border-collapse:collapse;margin:8px 0;font-size:13px}
@@ -71,18 +64,20 @@
  .warn{background:#fbf6ec;border:1px solid #e7d6b0;border-radius:6px;padding:8px 12px;font-size:12px;margin:8px 0}
  .muted{color:#999}
 
- /* sticky top bar (Tier-1 #1) — bleeds to body padding edges. */
- .topbar{position:sticky;top:0;background:#fdfdfd;border-bottom:1px solid #e5e5e5;
-   padding:8px 24px;margin:8px -24px 16px -24px;z-index:100;
-   box-shadow:0 1px 3px rgba(0,0,0,0.04);font-size:12px;color:#444}
- .topbar .range-info{margin-bottom:4px}
- .topbar #rangeLabel{font-weight:600;color:#222}
- .topbar .controls{margin-top:4px}
- .topbar .controls select{font-size:12px;margin:0 4px}
- .topbar .controls button{font-size:12px;margin:0 2px;padding:1px 6px}
- .topbar .controls input[type=date]{font-size:11px;padding:1px 4px;border:1px solid #ccc;border-radius:3px;margin:0 2px}
- .topbar .controls label{margin:0 4px}
- .topbar .controls .sep{color:#ccc;margin:0 4px}
+ /* sticky header bar (Tier-1 #1) — filters left, brand right; bleeds to edges. */
+ .header-bar{position:sticky;top:0;background:#fdfdfd;border-bottom:1px solid #e5e5e5;
+   padding:8px 24px;margin:0 -24px 16px -24px;z-index:100;
+   box-shadow:0 1px 3px rgba(0,0,0,0.04);font-size:12px;color:#444;
+   display:flex;justify-content:space-between;align-items:flex-start;gap:24px;flex-wrap:wrap}
+ .header-bar .filters{flex:1 1 460px;min-width:0}
+ .header-bar .range-info{margin-bottom:4px}
+ .header-bar #rangeLabel{font-weight:600;color:#222}
+ .header-bar .controls{margin-top:4px}
+ .header-bar .controls select{font-size:12px;margin:0 4px}
+ .header-bar .controls button{font-size:12px;margin:0 2px;padding:1px 6px}
+ .header-bar .controls input[type=date]{font-size:11px;padding:1px 4px;border:1px solid #ccc;border-radius:3px;margin:0 2px}
+ .header-bar .controls label{margin:0 4px}
+ .header-bar .controls .sep{color:#ccc;margin:0 4px}
 
  /* Tier-1 #5 preset chips. Active chip filled blue (matches POS color). */
  .chips{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0 4px}
@@ -91,18 +86,15 @@
  .chip:hover{background:#f0f0f0}
  .chip.active{background:#2b6cb0;color:#fff;border-color:#2b6cb0}
 
- /* Calendar — flex-wrap, default 3 months per row (user-pickable 1/2/3/4).
-    Cell width scales up as months-per-row goes down so fewer columns means
-    individual months get more breathing room. data-cols="N" attribute on
-    .cal-wrap (set by renderCal from `calCols`) drives the size variants.
-    6 weekday columns now (Mon-Fri + Sun, no Saturday), so max-widths are
-    tighter than the phase-1 7-col version. */
- .cal-wrap{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start;
-   max-width:1060px}    /* default = 3 cols (matches [data-cols="3"] below) */
- .cal-wrap[data-cols="1"]{max-width:620px}
- .cal-wrap[data-cols="2"]{max-width:900px}
- .cal-wrap[data-cols="3"]{max-width:1060px}
- .cal-wrap[data-cols="4"]{max-width:1180px}
+ /* Calendar — FR-PIVOT-8: the viewport is exactly `calCols` months and renders
+    as a SINGLE row (no wrap). Cell width scales up as months-per-row goes down
+    so fewer columns get more breathing room; data-cols="N" on .cal-wrap (set by
+    renderCal from `calCols`) drives the size variants. overflow-x:auto lets a
+    wide window (cols=4) or a narrow screen scroll instead of wrapping — the old
+    flex-wrap + max-width caps wrapped the 3rd month onto a 2nd row once a full
+    3-month window exceeded the cap. 6 weekday columns (Mon-Fri + Sun, no Sat). */
+ .cal-wrap{display:flex;flex-wrap:nowrap;gap:18px;align-items:flex-start;
+   overflow-x:auto}
  .cal-wrap[data-cols="1"] .cal td,.cal-wrap[data-cols="1"] .cal th{width:100px;height:80px}
  .cal-wrap[data-cols="1"] .cal .dn{font-size:13px}
  .cal-wrap[data-cols="1"] .cal .dp{font-size:15px}
@@ -115,6 +107,7 @@
  .cal-cols-picker{font-size:11px;color:#666;margin:4px 0 8px;
    display:flex;align-items:center;gap:6px;flex-wrap:wrap}
  .cal-cols-picker .chip{padding:2px 10px;min-width:26px}
+ .cal-cols-picker .chip:disabled{opacity:.35;cursor:default}
  .cal{font-size:11px}
  .cal h3{font-size:13px;margin:4px 0;font-weight:600;cursor:pointer;user-select:none}
  .cal h3:hover{color:#2b6cb0}
@@ -131,6 +124,7 @@
 
  #detailFilter{font-size:12px;padding:3px 6px;width:280px;max-width:100%;margin:4px 0}
  #detailCount{font-size:11px;color:#888;margin-left:10px}
+ #detailExport{font-size:12px;padding:3px 8px;margin-left:10px;cursor:pointer}
  .scroll-x{overflow-x:auto;max-width:100%}
  .row-idx{color:#aaa;text-align:right;font-variant-numeric:tabular-nums;
    width:1%;white-space:nowrap;padding-left:8px;padding-right:8px}
@@ -154,7 +148,8 @@
  }
  @media (max-width: 700px){
    body{padding:0 14px;margin:14px auto}
-   .topbar{padding:8px 14px;margin:8px -14px 14px -14px}
+   .header-bar{padding:8px 14px;margin:0 -14px 14px -14px}
+   .brand{text-align:left;flex-basis:100%}
    .cards-primary{grid-template-columns:repeat(2, 1fr);gap:8px}
    .cards-secondary{grid-template-columns:repeat(2, 1fr);gap:6px}
    .kpi-grid{grid-template-columns:1fr}
@@ -166,52 +161,51 @@
    h2{font-size:15px;margin:22px 0 6px}
  }
 </style></head><body>
-<header class="page-header">
-  <div class="title-block">
+<div class="header-bar" role="region" aria-label="global filter">
+  <div class="filters">
+    <div class="range-info"><span id="rangeLabel">Range: —</span></div>
+    <div class="chips" id="presetChips">
+      <button class="chip" data-preset="today">Today</button>
+      <button class="chip" data-preset="this-week">This week</button>
+      <button class="chip" data-preset="last-week">Last week</button>
+      <button class="chip" data-preset="this-month">This month</button>
+      <button class="chip" data-preset="last-month">Last month</button>
+      <button class="chip" data-preset="last-30">Last 30d</button>
+      <button class="chip" data-preset="ytd">YTD</button>
+      <button class="chip" data-preset="all">All</button>
+    </div>
+    <div class="controls">
+      Setup <select id="fSetup"></select>
+      Class <select id="fClass"></select>
+      <span class="sep">·</span>
+      <label>from <input type="date" id="fFrom"></label>
+      <label>to <input type="date" id="fTo"></label>
+      <span class="sep">·</span>
+      <button id="rangePrev" type="button" title="shift window back by its own width">←</button>
+      <button id="rangeNext" type="button" title="shift window forward by its own width">→</button>
+      <button id="fReset" type="button">reset</button>
+    </div>
+  </div>
+  <div class="brand">
     <h1>TraderLens — Trade Analytics</h1>
-    <div class="meta">generated 2026-05-27 20:49:20 EDT (New York) · neutral colors:
+    <div class="meta">generated 2026-06-01 19:07:04 EDT (New York) · neutral colors:
      <span class="pos">▲ blue = profit</span> · <span class="neg">▼ amber = loss</span></div>
-  </div>
-  <aside class="notices" aria-label="advisory notices">
-    <div class='data-note' title='FIFO pairing edges — round-trip stats exclude these legs'><b>Pairing edges</b>: 10 still open · 50 closes opened before this window.</div>
-    <div id="sampleWarn"></div>
-  </aside>
-</header>
-
-<div class="topbar" role="region" aria-label="global filter">
-  <div class="range-info"><span id="rangeLabel">Range: —</span></div>
-  <div class="chips" id="presetChips">
-    <button class="chip" data-preset="today">Today</button>
-    <button class="chip" data-preset="this-week">This week</button>
-    <button class="chip" data-preset="last-week">Last week</button>
-    <button class="chip" data-preset="this-month">This month</button>
-    <button class="chip" data-preset="last-month">Last month</button>
-    <button class="chip" data-preset="last-30">Last 30d</button>
-    <button class="chip" data-preset="ytd">YTD</button>
-    <button class="chip" data-preset="all">All</button>
-  </div>
-  <div class="controls">
-    Setup <select id="fSetup"></select>
-    Class <select id="fClass"></select>
-    <span class="sep">·</span>
-    <label>from <input type="date" id="fFrom"></label>
-    <label>to <input type="date" id="fTo"></label>
-    <span class="sep">·</span>
-    <button id="rangePrev" type="button" title="shift window back by its own width">←</button>
-    <button id="rangeNext" type="button" title="shift window forward by its own width">→</button>
-    <button id="fReset" type="button">reset</button>
   </div>
 </div>
 
 <div id="kpiHeadline"></div>
 
 <h2>Calendar — daily net P&amp;L (click a day to drill down)</h2>
-<div class="cal-cols-picker" id="calColsPicker">
-  <span class="muted">months/row:</span>
-  <button class="chip" data-cols="1" type="button">1</button>
-  <button class="chip" data-cols="2" type="button">2</button>
-  <button class="chip active" data-cols="3" type="button">3</button>
-  <button class="chip" data-cols="4" type="button">4</button>
+<div class="cal-cols-picker">
+  <button id="calPrev" class="chip" type="button" title="show older months">←</button>
+  <button id="calNext" class="chip" type="button" title="show newer months">→</button>
+  <span class="muted" style="margin-left:10px">months:</span>
+  <span id="calColsPicker">
+    <button class="chip" data-cols="1" type="button">1</button>
+    <button class="chip" data-cols="2" type="button">2</button>
+    <button class="chip active" data-cols="3" type="button">3</button>
+    <button class="chip" data-cols="4" type="button">4</button>
+  </span>
 </div>
 <div id="calendar"></div>
 <div id="drill" class="drill"></div>
@@ -226,7 +220,7 @@
 <div id="pivot"></div>
 
 <h2>Trade detail (click a header to sort)</h2>
-<input id="detailFilter" type="text" placeholder="filter rows (substring match)…"><span id="detailCount"></span>
+<input id="detailFilter" type="text" placeholder="filter rows (substring match)…"><span id="detailCount"></span><button id="detailExport" type="button" title="download the rows currently shown as CSV">⬇ CSV</button>
 <div id="detail" class="scroll-x"></div>
 
 <script>/*! jQuery v3.7.1 | (c) OpenJS Foundation and other contributors | jquery.org/license */
@@ -256,7 +250,9 @@
   var LIFETIME = null;        // Tier-1 #6: full-DATA baseline, set once at boot;
                               // streak cards show "<current> · all-time: <lifetime>"
                               // so user never loses absolute reference under filter.
-  var calCols = 3;            // user-pickable: 1/2/3/4 months per row (default 3)
+  var calCols = 3;            // FR-PIVOT-8: viewport width = months shown (default 3)
+  var calAnchor = null;       // FR-PIVOT-8: right-edge month "YYYY-MM" of the
+                              // calendar viewport; set at boot to most-recent data month
   var $sel = function(id){return document.getElementById(id);};
 
   // === helpers ===
@@ -325,7 +321,7 @@
     filterState.from = r.from;
     filterState.to = r.to;
     activePreset = name;
-    syncDateInputs(); syncChipActive();
+    syncDateInputs(); syncChipActive(); reanchorToFilter();
     rerender();
   }
   function syncDateInputs(){
@@ -334,7 +330,10 @@
     $sel('fTo').value = filterState.to || '';
   }
   function syncChipActive(){
-    var chips = document.querySelectorAll('.chip');
+    // Only the date-preset chips toggle here. The calendar width buttons
+    // (data-cols) and the calendar arrows (calPrev/calNext) manage their own
+    // state — scoping to [data-preset] keeps this from resetting them.
+    var chips = document.querySelectorAll('.chip[data-preset]');
     for(var i=0;i<chips.length;i++){
       chips[i].className = (chips[i].getAttribute('data-preset') === activePreset) ? 'chip active' : 'chip';
     }
@@ -350,7 +349,7 @@
     var width = Math.round((d1-d0)/86400000) + 1;
     filterState.from = addDays(filterState.from, dir*width);
     filterState.to   = addDays(filterState.to,   dir*width);
-    clearActivePreset(); syncDateInputs(); rerender();
+    clearActivePreset(); syncDateInputs(); reanchorToFilter(); rerender();
   }
   function onDateInputChange(){
     filterState.from = $sel('fFrom').value || null;
@@ -360,7 +359,7 @@
       filterState.to = filterState.from;
       $sel('fTo').value = filterState.to;
     }
-    clearActivePreset(); rerender();
+    clearActivePreset(); reanchorToFilter(); rerender();
   }
 
   // === analytics — ports of Python src/pivot.py _kpis / _max_drawdown /
@@ -509,22 +508,6 @@
       return "<div class='" + cls_ + "'>" + items.map(function(c){return card(c[0],c[1]);}).join('') + "</div>";
     }
 
-    // Sample-size warning lives in the top-right notices aside (NOT in the
-    // headline block) so it doesn't steal vertical space from Net P&L on
-    // wide screens. Threshold = 30 (loose enough to flag early, strict
-    // enough to suppress noise on very-small N).
-    var warnEl = $sel('sampleWarn');
-    if(warnEl){
-      if(k.n_closed > 0 && k.n_closed < 30){
-        warnEl.innerHTML = "<div class='sample-warn' title='small-sample caveat'>" +
-          "⚠ small sample (n=" + k.n_closed +
-          ") — PF / Win% / R:R are volatile below ~30 RT; treat as directional, not precise." +
-          "</div>";
-      } else {
-        warnEl.innerHTML = '';
-      }
-    }
-
     // Headline: just the dollars. Big.
     var headline = "<div class='cards-headline'><div class='card-xl'>" +
       "<div class='k'>Net P&L</div>" +
@@ -570,7 +553,7 @@
   function renderEquityCurve(k){
     var cum = k.cum, closed = k.closed;
     if(!cum.length){ $sel('equityCurve').innerHTML = "<p class='muted'>No closed round-trips to plot.</p>"; return; }
-    var w=860, h=260, padx=56, pady=22, iw=w-2*padx, ih=h-2*pady, n=cum.length;
+    var w=1180, h=300, padx=56, pady=22, iw=w-2*padx, ih=h-2*pady, n=cum.length;
     var lo = Math.min(0, Math.min.apply(null, cum));
     var hi = Math.max(0, Math.max.apply(null, cum));
     var span = (hi - lo) || 1;
@@ -653,26 +636,80 @@
     var n=parseInt(c.slice(1),16);
     return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a.toFixed(2)+')';
   }
+  // === FR-PIVOT-8: calendar windowed viewport ===
+  // The calendar is decoupled from the DATE filter (it's a navigator, not a
+  // scope): cells show real P&L for the viewport's months under the SETUP/CLASS
+  // filter only. The date filter shows as the in-range overlay. JS mirrors of
+  // the Python source-of-truth _calendar_window / _resolve_anchor.
+  function filteredNoDate(){
+    var s=filterState;
+    return DATA.filter(function(r){
+      if(s.setup && r.Setup !== s.setup) return false;
+      if(s["class"] && r.Class !== s["class"]) return false;
+      return true;
+    });
+  }
+  function monthExtent(rows){
+    var ds=rows.map(function(r){return r.CloseDate;}).filter(Boolean);
+    if(!ds.length) return {min:null, max:null};
+    ds.sort();
+    return {min:ds[0].slice(0,7), max:ds[ds.length-1].slice(0,7)};
+  }
+  function monthIdx(ym){ return (+ym.slice(0,4))*12 + (+ym.slice(5,7)-1); }
+  function idxMonth(i){ var y=Math.floor(i/12), m=i%12+1; return y+'-'+(m<10?'0'+m:''+m); }
+  function calWindow(anchor, cols, min, max){
+    if(!anchor||!min||!max) return {months:[], hasPrev:false, hasNext:false};
+    var lo=monthIdx(min), hi=monthIdx(max);
+    var a=Math.max(lo, Math.min(hi, monthIdx(anchor)));
+    var months=[]; for(var i=0;i<cols;i++) months.push(idxMonth(a-(cols-1)+i));
+    return {months:months, hasPrev:a>lo, hasNext:a<hi};
+  }
+  function resolveAnchor(cur, to, cols, min, max){
+    if(!max) return null;
+    if(!to) return cur || max;                       // unbounded "All" -> stay
+    var lo=monthIdx(min), hi=monthIdx(max);
+    var target=Math.max(lo, Math.min(hi, monthIdx(to)));
+    if(cur && calWindow(cur, cols, min, max).months.indexOf(idxMonth(target))>=0) return cur;
+    return idxMonth(target);
+  }
+  // Gentle re-anchor on any explicit date-filter change (chip/drag/title/typed/shift).
+  function reanchorToFilter(){
+    var ext=monthExtent(filteredNoDate());
+    calAnchor=resolveAnchor(calAnchor, filterState.to, calCols, ext.min, ext.max);
+  }
+  function setCalArrows(prev, next){
+    var p=$sel('calPrev'), n=$sel('calNext');
+    if(p) p.disabled=!prev;
+    if(n) n.disabled=!next;
+  }
+  // View-only paging: move the viewport, never touch the filter or the stats.
+  function pageCal(dir){
+    var ext=monthExtent(filteredNoDate());
+    if(!ext.max || !calAnchor) return;
+    var lo=monthIdx(ext.min), hi=monthIdx(ext.max);
+    calAnchor=idxMonth(Math.max(lo, Math.min(hi, monthIdx(calAnchor)+dir*calCols)));
+    renderCal();
+  }
   function renderCal(){
-    var rows=filtered(), m=byDay(rows), days=Object.keys(m);
+    var rows=filteredNoDate(), m=byDay(rows);   // FR-PIVOT-8: setup/class only, NOT date
     var wrap=$sel('calendar');
-    if(!days.length){ wrap.innerHTML="<p class='muted'>No closed round-trips for this filter.</p>"; $sel('drill').innerHTML=''; return; }
-    var maxAbs=Math.max.apply(null,days.map(function(d){return Math.abs(m[d].net);}));
-    days.sort();
-    // Saturday-data guard: CME is closed Sat — but IB stamps calendar date, so
-    // any Sat tradeDate is anomalous (or non-CME). Surface it so we don't
-    // silently hide it from the (Sat-less) calendar grid.
-    var satDays = days.filter(function(d){ return new Date(d+'T00:00:00').getDay() === 6; });
+    if(!rows.length){ wrap.innerHTML="<p class='muted'>No round-trips for this filter.</p>"; $sel('drill').innerHTML=''; setCalArrows(false,false); return; }
+    var ext=monthExtent(rows);
+    // Clamp the anchor into the (possibly setup/class-narrowed) data extent.
+    if(!calAnchor || calAnchor>ext.max) calAnchor=ext.max;
+    if(calAnchor<ext.min) calAnchor=ext.min;
+    var win=calWindow(calAnchor, calCols, ext.min, ext.max);
+    // maxAbs + Saturday guard scoped to the VISIBLE viewport days only.
+    var visDays=Object.keys(m).filter(function(d){ return win.months.indexOf(d.slice(0,7))>=0; });
+    var maxAbs=visDays.length ? Math.max.apply(null,visDays.map(function(d){return Math.abs(m[d].net);})) : 0;
+    var satDays = visDays.filter(function(d){ return new Date(d+'T00:00:00').getDay() === 6; });
     var satNote = satDays.length ? ("<div class='note' style='color:#c2792e'>⚠ " +
-      satDays.length + " Saturday trade-date(s) in this view — Saturday column is hidden in the calendar; see the detail table for these.</div>") : '';
-    var first=days[0], last=days[days.length-1];
-    var y0=+first.slice(0,4),mo0=+first.slice(5,7)-1, y1=+last.slice(0,4),mo1=+last.slice(5,7)-1;
+      satDays.length + " Saturday trade-date(s) in view — Saturday column is hidden in the calendar; see the detail table for these.</div>") : '';
     var html=satNote + '<div class="cal-wrap" data-cols="'+calCols+'">';
-    for(var Y=y0,M=mo0; Y<y1||(Y===y1&&M<=mo1); (M===11?(M=0,Y++):M++)){
-      html+=monthGrid(Y,M,m,maxAbs);
-    }
+    win.months.forEach(function(ym){ html+=monthGrid(+ym.slice(0,4), +ym.slice(5,7)-1, m, maxAbs); });
     html+='</div>';
     wrap.innerHTML=html;
+    setCalArrows(win.hasPrev, win.hasNext);
     // Tier-1 #5: month title click filters to that whole month.
     var titles = wrap.querySelectorAll('.cal h3');
     for(var i=0;i<titles.length;i++){
@@ -680,7 +717,7 @@
         h3.onclick = function(){
           var iso = h3.getAttribute('data-mo');
           filterState.from = iso; filterState.to = endOfMonth(iso);
-          clearActivePreset(); syncDateInputs(); rerender();
+          clearActivePreset(); syncDateInputs(); reanchorToFilter(); rerender();
         };
       })(titles[i]);
     }
@@ -710,7 +747,7 @@
             var f = start < end ? start : end;
             var t = start < end ? end   : start;
             filterState.from = f; filterState.to = t;
-            clearActivePreset(); syncDateInputs(); rerender();
+            clearActivePreset(); syncDateInputs(); reanchorToFilter(); rerender();
           }
         };
       })(cells[j]);
@@ -826,6 +863,36 @@
     });
   }
 
+  // --- CSV export (Tier-2): download exactly the rows currently visible in
+  // the detail table — filter + substring + sort all applied (WYSIWYG). Logic
+  // mirror of Python _detail_csv (the unit-tested source of truth). RFC-4180
+  // quoting + UTF-8 BOM (﻿, so Excel reads CJK notes), CRLF terminators.
+  // Emits raw underlying values, NOT the display-formatted P&L — a spreadsheet
+  // wants the number 1234.5, not "+$1,234.50".
+  function csvField(v){
+    var s = (v==null) ? '' : String(v);
+    return /[",\r\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+  }
+  function toCSV(rows){
+    var head = COLS.map(function(c){ return csvField(c[1]); }).join(',');
+    var body = rows.map(function(r){
+      return COLS.map(function(c){ return csvField(r[c[0]]); }).join(',');
+    });
+    return '﻿' + [head].concat(body).join('\r\n') + '\r\n';
+  }
+  function exportDetailCsv(){
+    var rows = detailRows();
+    var name = (filterState.from && filterState.to)
+      ? 'traderlens_'+filterState.from+'_'+filterState.to+'.csv'
+      : 'traderlens_all.csv';
+    var blob = new Blob([toCSV(rows)], {type:'text/csv;charset=utf-8'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  }
+
   // --- pivot (PivotTable.js) — only the FR-PIVOT-4.4 dims draggable ---
   function initPivot(){
     var hidden=Object.keys(DATA[0]||{}).filter(function(k){return CFG.dims.indexOf(k)<0;});
@@ -857,6 +924,10 @@
 
   function boot(){
     LIFETIME = computeKpis(DATA);   // Tier-1 #6 — full-DATA baseline, never re-filtered.
+    calAnchor = monthExtent(filteredNoDate()).max;   // FR-PIVOT-8: default = most-recent data month
+    // Wire CSV export before the empty-DATA bail-out so the button is live even
+    // on an empty archive (it just downloads a header-only file — no crash).
+    $sel('detailExport').onclick = exportDetailCsv;
     if(!DATA.length){
       $sel('calendar').innerHTML="<p class='muted'>No round-trips.</p>";
       syncChipActive();  // mark "All" active even when empty
@@ -883,6 +954,12 @@
     $sel('fTo').onchange   = onDateInputChange;
     $sel('rangePrev').onclick = function(){ shiftRange(-1); };
     $sel('rangeNext').onclick = function(){ shiftRange( 1); };
+
+    // FR-PIVOT-8: calendar viewport arrows — view-only paging by `calCols`
+    // months. They move the displayed window without touching the date filter
+    // (distinct from the filter-bar ← → above, which shift the filter window).
+    if($sel('calPrev')) $sel('calPrev').onclick = function(){ pageCal(-1); };
+    if($sel('calNext')) $sel('calNext').onclick = function(){ pageCal( 1); };
 
     // Calendar months-per-row picker (1/2/3/4) — re-renders just the calendar.
     var colPicker = $sel('calColsPicker');
