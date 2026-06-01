@@ -22,6 +22,8 @@ CLI: python -m src.pivot [--db PATH] [--out PATH]
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
 import os
 import subprocess
@@ -154,6 +156,7 @@ _PAGE_CSS = """
  .cal-cols-picker{font-size:11px;color:#666;margin:4px 0 8px;
    display:flex;align-items:center;gap:6px;flex-wrap:wrap}
  .cal-cols-picker .chip{padding:2px 10px;min-width:26px}
+ .cal-cols-picker .chip:disabled{opacity:.35;cursor:default}
  .cal{font-size:11px}
  .cal h3{font-size:13px;margin:4px 0;font-weight:600;cursor:pointer;user-select:none}
  .cal h3:hover{color:#2b6cb0}
@@ -170,6 +173,7 @@ _PAGE_CSS = """
 
  #detailFilter{font-size:12px;padding:3px 6px;width:280px;max-width:100%;margin:4px 0}
  #detailCount{font-size:11px;color:#888;margin-left:10px}
+ #detailExport{font-size:12px;padding:3px 8px;margin-left:10px;cursor:pointer}
  .scroll-x{overflow-x:auto;max-width:100%}
  .row-idx{color:#aaa;text-align:right;font-variant-numeric:tabular-nums;
    width:1%;white-space:nowrap;padding-left:8px;padding-right:8px}
@@ -221,7 +225,9 @@ _APP_JS = r"""
   var LIFETIME = null;        // Tier-1 #6: full-DATA baseline, set once at boot;
                               // streak cards show "<current> · all-time: <lifetime>"
                               // so user never loses absolute reference under filter.
-  var calCols = 3;            // user-pickable: 1/2/3/4 months per row (default 3)
+  var calCols = 3;            // FR-PIVOT-8: viewport width = months shown (default 3)
+  var calAnchor = null;       // FR-PIVOT-8: right-edge month "YYYY-MM" of the
+                              // calendar viewport; set at boot to most-recent data month
   var $sel = function(id){return document.getElementById(id);};
 
   // === helpers ===
@@ -290,7 +296,7 @@ _APP_JS = r"""
     filterState.from = r.from;
     filterState.to = r.to;
     activePreset = name;
-    syncDateInputs(); syncChipActive();
+    syncDateInputs(); syncChipActive(); reanchorToFilter();
     rerender();
   }
   function syncDateInputs(){
@@ -299,7 +305,10 @@ _APP_JS = r"""
     $sel('fTo').value = filterState.to || '';
   }
   function syncChipActive(){
-    var chips = document.querySelectorAll('.chip');
+    // Only the date-preset chips toggle here. The calendar width buttons
+    // (data-cols) and the calendar arrows (calPrev/calNext) manage their own
+    // state — scoping to [data-preset] keeps this from resetting them.
+    var chips = document.querySelectorAll('.chip[data-preset]');
     for(var i=0;i<chips.length;i++){
       chips[i].className = (chips[i].getAttribute('data-preset') === activePreset) ? 'chip active' : 'chip';
     }
@@ -315,7 +324,7 @@ _APP_JS = r"""
     var width = Math.round((d1-d0)/86400000) + 1;
     filterState.from = addDays(filterState.from, dir*width);
     filterState.to   = addDays(filterState.to,   dir*width);
-    clearActivePreset(); syncDateInputs(); rerender();
+    clearActivePreset(); syncDateInputs(); reanchorToFilter(); rerender();
   }
   function onDateInputChange(){
     filterState.from = $sel('fFrom').value || null;
@@ -325,7 +334,7 @@ _APP_JS = r"""
       filterState.to = filterState.from;
       $sel('fTo').value = filterState.to;
     }
-    clearActivePreset(); rerender();
+    clearActivePreset(); reanchorToFilter(); rerender();
   }
 
   // === analytics — ports of Python src/pivot.py _kpis / _max_drawdown /
@@ -602,26 +611,80 @@ _APP_JS = r"""
     var n=parseInt(c.slice(1),16);
     return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a.toFixed(2)+')';
   }
+  // === FR-PIVOT-8: calendar windowed viewport ===
+  // The calendar is decoupled from the DATE filter (it's a navigator, not a
+  // scope): cells show real P&L for the viewport's months under the SETUP/CLASS
+  // filter only. The date filter shows as the in-range overlay. JS mirrors of
+  // the Python source-of-truth _calendar_window / _resolve_anchor.
+  function filteredNoDate(){
+    var s=filterState;
+    return DATA.filter(function(r){
+      if(s.setup && r.Setup !== s.setup) return false;
+      if(s["class"] && r.Class !== s["class"]) return false;
+      return true;
+    });
+  }
+  function monthExtent(rows){
+    var ds=rows.map(function(r){return r.CloseDate;}).filter(Boolean);
+    if(!ds.length) return {min:null, max:null};
+    ds.sort();
+    return {min:ds[0].slice(0,7), max:ds[ds.length-1].slice(0,7)};
+  }
+  function monthIdx(ym){ return (+ym.slice(0,4))*12 + (+ym.slice(5,7)-1); }
+  function idxMonth(i){ var y=Math.floor(i/12), m=i%12+1; return y+'-'+(m<10?'0'+m:''+m); }
+  function calWindow(anchor, cols, min, max){
+    if(!anchor||!min||!max) return {months:[], hasPrev:false, hasNext:false};
+    var lo=monthIdx(min), hi=monthIdx(max);
+    var a=Math.max(lo, Math.min(hi, monthIdx(anchor)));
+    var months=[]; for(var i=0;i<cols;i++) months.push(idxMonth(a-(cols-1)+i));
+    return {months:months, hasPrev:a>lo, hasNext:a<hi};
+  }
+  function resolveAnchor(cur, to, cols, min, max){
+    if(!max) return null;
+    if(!to) return cur || max;                       // unbounded "All" -> stay
+    var lo=monthIdx(min), hi=monthIdx(max);
+    var target=Math.max(lo, Math.min(hi, monthIdx(to)));
+    if(cur && calWindow(cur, cols, min, max).months.indexOf(idxMonth(target))>=0) return cur;
+    return idxMonth(target);
+  }
+  // Gentle re-anchor on any explicit date-filter change (chip/drag/title/typed/shift).
+  function reanchorToFilter(){
+    var ext=monthExtent(filteredNoDate());
+    calAnchor=resolveAnchor(calAnchor, filterState.to, calCols, ext.min, ext.max);
+  }
+  function setCalArrows(prev, next){
+    var p=$sel('calPrev'), n=$sel('calNext');
+    if(p) p.disabled=!prev;
+    if(n) n.disabled=!next;
+  }
+  // View-only paging: move the viewport, never touch the filter or the stats.
+  function pageCal(dir){
+    var ext=monthExtent(filteredNoDate());
+    if(!ext.max || !calAnchor) return;
+    var lo=monthIdx(ext.min), hi=monthIdx(ext.max);
+    calAnchor=idxMonth(Math.max(lo, Math.min(hi, monthIdx(calAnchor)+dir*calCols)));
+    renderCal();
+  }
   function renderCal(){
-    var rows=filtered(), m=byDay(rows), days=Object.keys(m);
+    var rows=filteredNoDate(), m=byDay(rows);   // FR-PIVOT-8: setup/class only, NOT date
     var wrap=$sel('calendar');
-    if(!days.length){ wrap.innerHTML="<p class='muted'>No closed round-trips for this filter.</p>"; $sel('drill').innerHTML=''; return; }
-    var maxAbs=Math.max.apply(null,days.map(function(d){return Math.abs(m[d].net);}));
-    days.sort();
-    // Saturday-data guard: CME is closed Sat — but IB stamps calendar date, so
-    // any Sat tradeDate is anomalous (or non-CME). Surface it so we don't
-    // silently hide it from the (Sat-less) calendar grid.
-    var satDays = days.filter(function(d){ return new Date(d+'T00:00:00').getDay() === 6; });
+    if(!rows.length){ wrap.innerHTML="<p class='muted'>No round-trips for this filter.</p>"; $sel('drill').innerHTML=''; setCalArrows(false,false); return; }
+    var ext=monthExtent(rows);
+    // Clamp the anchor into the (possibly setup/class-narrowed) data extent.
+    if(!calAnchor || calAnchor>ext.max) calAnchor=ext.max;
+    if(calAnchor<ext.min) calAnchor=ext.min;
+    var win=calWindow(calAnchor, calCols, ext.min, ext.max);
+    // maxAbs + Saturday guard scoped to the VISIBLE viewport days only.
+    var visDays=Object.keys(m).filter(function(d){ return win.months.indexOf(d.slice(0,7))>=0; });
+    var maxAbs=visDays.length ? Math.max.apply(null,visDays.map(function(d){return Math.abs(m[d].net);})) : 0;
+    var satDays = visDays.filter(function(d){ return new Date(d+'T00:00:00').getDay() === 6; });
     var satNote = satDays.length ? ("<div class='note' style='color:#c2792e'>⚠ " +
-      satDays.length + " Saturday trade-date(s) in this view — Saturday column is hidden in the calendar; see the detail table for these.</div>") : '';
-    var first=days[0], last=days[days.length-1];
-    var y0=+first.slice(0,4),mo0=+first.slice(5,7)-1, y1=+last.slice(0,4),mo1=+last.slice(5,7)-1;
+      satDays.length + " Saturday trade-date(s) in view — Saturday column is hidden in the calendar; see the detail table for these.</div>") : '';
     var html=satNote + '<div class="cal-wrap" data-cols="'+calCols+'">';
-    for(var Y=y0,M=mo0; Y<y1||(Y===y1&&M<=mo1); (M===11?(M=0,Y++):M++)){
-      html+=monthGrid(Y,M,m,maxAbs);
-    }
+    win.months.forEach(function(ym){ html+=monthGrid(+ym.slice(0,4), +ym.slice(5,7)-1, m, maxAbs); });
     html+='</div>';
     wrap.innerHTML=html;
+    setCalArrows(win.hasPrev, win.hasNext);
     // Tier-1 #5: month title click filters to that whole month.
     var titles = wrap.querySelectorAll('.cal h3');
     for(var i=0;i<titles.length;i++){
@@ -629,7 +692,7 @@ _APP_JS = r"""
         h3.onclick = function(){
           var iso = h3.getAttribute('data-mo');
           filterState.from = iso; filterState.to = endOfMonth(iso);
-          clearActivePreset(); syncDateInputs(); rerender();
+          clearActivePreset(); syncDateInputs(); reanchorToFilter(); rerender();
         };
       })(titles[i]);
     }
@@ -659,7 +722,7 @@ _APP_JS = r"""
             var f = start < end ? start : end;
             var t = start < end ? end   : start;
             filterState.from = f; filterState.to = t;
-            clearActivePreset(); syncDateInputs(); rerender();
+            clearActivePreset(); syncDateInputs(); reanchorToFilter(); rerender();
           }
         };
       })(cells[j]);
@@ -775,6 +838,36 @@ _APP_JS = r"""
     });
   }
 
+  // --- CSV export (Tier-2): download exactly the rows currently visible in
+  // the detail table — filter + substring + sort all applied (WYSIWYG). Logic
+  // mirror of Python _detail_csv (the unit-tested source of truth). RFC-4180
+  // quoting + UTF-8 BOM (﻿, so Excel reads CJK notes), CRLF terminators.
+  // Emits raw underlying values, NOT the display-formatted P&L — a spreadsheet
+  // wants the number 1234.5, not "+$1,234.50".
+  function csvField(v){
+    var s = (v==null) ? '' : String(v);
+    return /[",\r\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+  }
+  function toCSV(rows){
+    var head = COLS.map(function(c){ return csvField(c[1]); }).join(',');
+    var body = rows.map(function(r){
+      return COLS.map(function(c){ return csvField(r[c[0]]); }).join(',');
+    });
+    return '﻿' + [head].concat(body).join('\r\n') + '\r\n';
+  }
+  function exportDetailCsv(){
+    var rows = detailRows();
+    var name = (filterState.from && filterState.to)
+      ? 'traderlens_'+filterState.from+'_'+filterState.to+'.csv'
+      : 'traderlens_all.csv';
+    var blob = new Blob([toCSV(rows)], {type:'text/csv;charset=utf-8'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  }
+
   // --- pivot (PivotTable.js) — only the FR-PIVOT-4.4 dims draggable ---
   function initPivot(){
     var hidden=Object.keys(DATA[0]||{}).filter(function(k){return CFG.dims.indexOf(k)<0;});
@@ -806,6 +899,10 @@ _APP_JS = r"""
 
   function boot(){
     LIFETIME = computeKpis(DATA);   // Tier-1 #6 — full-DATA baseline, never re-filtered.
+    calAnchor = monthExtent(filteredNoDate()).max;   // FR-PIVOT-8: default = most-recent data month
+    // Wire CSV export before the empty-DATA bail-out so the button is live even
+    // on an empty archive (it just downloads a header-only file — no crash).
+    $sel('detailExport').onclick = exportDetailCsv;
     if(!DATA.length){
       $sel('calendar').innerHTML="<p class='muted'>No round-trips.</p>";
       syncChipActive();  // mark "All" active even when empty
@@ -832,6 +929,12 @@ _APP_JS = r"""
     $sel('fTo').onchange   = onDateInputChange;
     $sel('rangePrev').onclick = function(){ shiftRange(-1); };
     $sel('rangeNext').onclick = function(){ shiftRange( 1); };
+
+    // FR-PIVOT-8: calendar viewport arrows — view-only paging by `calCols`
+    // months. They move the displayed window without touching the date filter
+    // (distinct from the filter-bar ← → above, which shift the filter window).
+    if($sel('calPrev')) $sel('calPrev').onclick = function(){ pageCal(-1); };
+    if($sel('calNext')) $sel('calNext').onclick = function(){ pageCal( 1); };
 
     // Calendar months-per-row picker (1/2/3/4) — re-renders just the calendar.
     var colPicker = $sel('calColsPicker');
@@ -906,6 +1009,91 @@ def _record(rt: RoundTrip, tag_code: str, tag_name: str,
         "OpenPx": rt.open_price,
         "ClosePx": rt.close_price,
     }
+
+
+# --- detail-table CSV export (Tier-2) ---
+# Columns surfaced in the browser "Download CSV" — a logic mirror of the JS
+# `COLS` array in _APP_JS (keep the two in sync). (record-key, header label).
+# Same set/order the detail table shows on screen.
+_DETAIL_COLS = (
+    ("CloseDate", "Close date"), ("CloseTime", "Close time"),
+    ("OpenDate", "Open date"), ("OpenTime", "Open time"),
+    ("Setup", "Setup"), ("Class", "Class"), ("Underlying", "Sym"),
+    ("Direction", "Dir"), ("Result", "Result"), ("Session", "Session"),
+    ("EntryDOW", "DOW"), ("HoldBucket", "Hold"), ("Qty", "Qty"),
+    ("PnL_USD", "P&L"), ("Hold_min", "Hold(m)"), ("Score", "Score"),
+    ("Notes", "Notes"),
+)
+
+
+def _detail_csv(records: list[dict]) -> str:
+    """Serialize detail records to a CSV string for the in-browser download.
+
+    Source-of-truth mirror of the JS `toCSV` (unit-tested here; the JS side is
+    verified visually). Header = the labels in `_DETAIL_COLS`, one row per
+    record in the given order. RFC-4180 quoting (stdlib csv handles `,` `"`
+    newlines), CRLF terminators, and a leading UTF-8 BOM so Excel reads CJK
+    notes without mojibake. None / missing values become empty cells. Raw
+    underlying values are emitted (numbers stay numeric) — a spreadsheet wants
+    `1234.5`, not the display-formatted `+$1,234.50`."""
+    buf = io.StringIO()
+    w = csv.writer(buf)  # defaults: CRLF terminator + QUOTE_MINIMAL (RFC-4180)
+    w.writerow([label for _, label in _DETAIL_COLS])
+    for r in records:
+        w.writerow(["" if r.get(k) is None else r.get(k) for k, _ in _DETAIL_COLS])
+    return "﻿" + buf.getvalue()
+
+
+# --- calendar viewport windowing (Tier-2, FR-PIVOT-8) ---
+# Pure month-arithmetic source of truth for the calendar's bounded viewport; the
+# JS `calWindow` / `resolveAnchor` mirror these (verified visually). Months are
+# "YYYY-MM" strings. Kept here (not just in JS) so the windowing + gentle
+# re-anchor rules are unit-tested independently of the DOM.
+
+def _month_index(ym: str) -> int:
+    """'YYYY-MM' (or any 'YYYY-MM…' prefix) -> absolute month index for math."""
+    return int(ym[:4]) * 12 + (int(ym[5:7]) - 1)
+
+
+def _index_month(idx: int) -> str:
+    """Inverse of _month_index -> 'YYYY-MM'."""
+    return f"{idx // 12:04d}-{idx % 12 + 1:02d}"
+
+
+def _calendar_window(anchor: str | None, cols: int,
+                     min_month: str | None, max_month: str | None) -> dict:
+    """The N-month viewport ending at `anchor` (FR-PIVOT-8).
+
+    Returns the 'YYYY-MM' months to render (oldest..newest, length == cols) plus
+    whether the older/newer paging arrows are live. The anchor is clamped into
+    the data extent; the window may include leading/trailing empty months when
+    the data is shorter than `cols`. Empty extent -> empty window, no arrows."""
+    if not anchor or not min_month or not max_month:
+        return {"months": [], "has_prev": False, "has_next": False}
+    lo, hi = _month_index(min_month), _month_index(max_month)
+    a = max(lo, min(hi, _month_index(anchor)))           # clamp anchor into extent
+    months = [_index_month(a - (cols - 1) + i) for i in range(cols)]
+    return {"months": months, "has_prev": a > lo, "has_next": a < hi}
+
+
+def _resolve_anchor(current: str | None, filter_to: str | None, cols: int,
+                    min_month: str | None, max_month: str | None) -> str | None:
+    """Gentle re-anchor rule (FR-PIVOT-8): on an explicit *bounded* date-filter
+    set, move the viewport's right edge to the filter's last month ONLY if that
+    month is not already visible; an unbounded filter (filter_to None / 'All')
+    leaves the view put. The target is clamped to the data extent. Returns the
+    new anchor 'YYYY-MM' (or None when there is no data)."""
+    if not max_month:                                    # no data
+        return None
+    if not filter_to:                                    # unbounded "All" -> stay
+        return current or max_month
+    lo, hi = _month_index(min_month), _month_index(max_month)
+    target = max(lo, min(hi, _month_index(filter_to)))
+    if current:
+        visible = _calendar_window(current, cols, min_month, max_month)["months"]
+        if _index_month(target) in visible:
+            return current                               # already on screen -> don't move
+    return _index_month(target)
 
 
 # --- KPI / drawdown / streak computation (Python; the headline + scoring) ---
@@ -1096,12 +1284,16 @@ def build_html(rts: list[RoundTrip], stats: dict,
 <div id="kpiHeadline"></div>
 
 <h2>Calendar — daily net P&amp;L (click a day to drill down)</h2>
-<div class="cal-cols-picker" id="calColsPicker">
-  <span class="muted">months/row:</span>
-  <button class="chip" data-cols="1" type="button">1</button>
-  <button class="chip" data-cols="2" type="button">2</button>
-  <button class="chip active" data-cols="3" type="button">3</button>
-  <button class="chip" data-cols="4" type="button">4</button>
+<div class="cal-cols-picker">
+  <button id="calPrev" class="chip" type="button" title="show older months">←</button>
+  <button id="calNext" class="chip" type="button" title="show newer months">→</button>
+  <span class="muted" style="margin-left:10px">months:</span>
+  <span id="calColsPicker">
+    <button class="chip" data-cols="1" type="button">1</button>
+    <button class="chip" data-cols="2" type="button">2</button>
+    <button class="chip active" data-cols="3" type="button">3</button>
+    <button class="chip" data-cols="4" type="button">4</button>
+  </span>
 </div>
 <div id="calendar"></div>
 <div id="drill" class="drill"></div>
@@ -1116,7 +1308,7 @@ def build_html(rts: list[RoundTrip], stats: dict,
 <div id="pivot"></div>
 
 <h2>Trade detail (click a header to sort)</h2>
-<input id="detailFilter" type="text" placeholder="filter rows (substring match)…"><span id="detailCount"></span>
+<input id="detailFilter" type="text" placeholder="filter rows (substring match)…"><span id="detailCount"></span><button id="detailExport" type="button" title="download the rows currently shown as CSV">⬇ CSV</button>
 <div id="detail" class="scroll-x"></div>
 
 <script>{jq}</script>

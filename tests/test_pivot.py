@@ -183,3 +183,163 @@ def test_generate_read_only_uses_ann_path_and_leaves_db_untouched(tmp_path):
     assert out_path.exists() and "var DATA" in out.read_text(encoding="utf-8")
     assert stats["round_trips"] == 1
     assert db.read_bytes() == snapshot   # read-only build did not mutate the DB
+
+
+# --- detail CSV export (Tier-2): Python source-of-truth for the browser
+# "Download CSV". The JS toCSV mirror is verified visually; the escaping /
+# column-order / BOM contract is locked here. ---
+
+def _csv_lines(text):
+    """Strip the BOM and split into CSV records on the CRLF terminator. An
+    embedded LF inside a quoted field is NOT a record boundary (csv uses \\r\\n),
+    so this split keeps such a field intact. Drops the trailing empty element
+    left by the final CRLF."""
+    assert text[0] == "﻿", "must start with a UTF-8 BOM (Excel CJK)"
+    return text[1:].split("\r\n")[:-1]
+
+
+def test_detail_csv_header_is_the_column_labels():
+    text = pivot._detail_csv([])
+    lines = _csv_lines(text)
+    assert len(lines) == 1   # header only when no records
+    assert lines[0] == ",".join(label for _, label in pivot._DETAIL_COLS)
+
+
+def test_detail_csv_uses_crlf_terminators():
+    # RFC-4180 + Excel friendliness: records end with CRLF, and the bare data
+    # contains no lone LF (the only LF allowed is one quoted inside a field).
+    text = pivot._detail_csv([{"Setup": "ORB"}])
+    assert text.endswith("\r\n")
+    assert "\n" not in text.replace("\r\n", "")   # no lone LF for plain records
+
+
+def test_detail_csv_emits_raw_values_in_column_order():
+    rec = {
+        "CloseDate": "2026-05-20", "CloseTime": "10:30:00",
+        "OpenDate": "2026-05-20", "OpenTime": "10:00:00",
+        "Setup": "ORB", "Class": "FUT", "Underlying": "MNQ",
+        "Direction": "LONG", "Result": "Win", "Session": "RTH",
+        "EntryDOW": "Wed", "HoldBucket": "0-30m", "Qty": 2,
+        "PnL_USD": 1234.5, "Hold_min": 30.0, "Score": 8.0, "Notes": "clean",
+        "open_trade_id": "IGNORE", "SetupCode": "IGNORE",   # extras dropped
+    }
+    row = _csv_lines(pivot._detail_csv([rec]))[1]
+    cells = row.split(",")
+    assert len(cells) == len(pivot._DETAIL_COLS)
+    # raw numeric P&L, not the display-formatted "+$1,234.50"
+    assert "1234.5" in cells and "+$" not in row
+    # column order follows _DETAIL_COLS, not dict insertion / alphabetical
+    assert cells[0] == "2026-05-20" and cells[4] == "ORB" and cells[-1] == "clean"
+
+
+def test_detail_csv_rfc4180_quoting():
+    # comma, embedded double-quote, and newline must all be quoted/escaped
+    recs = [
+        {"Notes": "a,b"},          # comma -> field quoted
+        {"Notes": 'say "hi"'},     # quote -> doubled + field quoted
+        {"Notes": "line1\nline2"}, # newline -> field quoted
+    ]
+    rows = _csv_lines(pivot._detail_csv(recs))[1:]
+    notes_idx = [k for k, _ in pivot._DETAIL_COLS].index("Notes")
+    # comma case: the quoted field keeps the comma inside one cell
+    assert rows[0].endswith('"a,b"')
+    # quote case: " -> ""
+    assert '"say ""hi"""' in rows[1]
+    # newline case: the record spans two physical lines but is one CSV record;
+    # _csv_lines split on CRLF, so the embedded LF keeps both halves together
+    joined = "\r\n".join(_csv_lines(pivot._detail_csv([recs[2]]))[1:])
+    assert '"line1\nline2"' in joined
+
+
+def test_detail_csv_none_and_missing_become_empty():
+    # Score=None (unscored) and a wholly absent key both render as empty cells
+    text = pivot._detail_csv([{"Setup": "ORB", "Score": None}])
+    cells = _csv_lines(text)[1].split(",")
+    cols = [k for k, _ in pivot._DETAIL_COLS]
+    assert cells[cols.index("Score")] == ""      # explicit None -> empty
+    assert cells[cols.index("Qty")] == ""        # missing key -> empty
+
+
+def test_detail_csv_preserves_cjk_notes():
+    text = pivot._detail_csv([{"Notes": "突破回踩，干净"}])
+    assert "突破回踩，干净" in text   # full-width comma is inside the note, not a delimiter
+
+
+def test_build_html_wires_csv_export_button():
+    rt = _rt("2026-05-20", "2026-05-20", 50, tid="E1")
+    stats = {"round_trips": 1, "unmatched_close_qty": 0, "still_open_qty": 0}
+    html = pivot.build_html([rt], stats)
+    assert 'id="detailExport"' in html          # the button exists
+    assert "exportDetailCsv" in html and "function toCSV" in html   # wired + mirror present
+
+
+# --- calendar windowed viewport (Tier-2, FR-PIVOT-8): Python source of truth
+# for the bounded N-month viewport + gentle re-anchor rule. JS mirror
+# (calWindow/resolveAnchor) verified visually. ---
+
+def test_calendar_window_recent_n_months():
+    w = pivot._calendar_window("2026-06", 3, "2025-01", "2026-06")
+    assert w["months"] == ["2026-04", "2026-05", "2026-06"]
+    assert w["has_next"] is False        # anchor at the data's max month
+    assert w["has_prev"] is True         # older data exists
+
+
+def test_calendar_window_crosses_year_boundary():
+    w = pivot._calendar_window("2026-01", 3, "2024-01", "2026-06")
+    assert w["months"] == ["2025-11", "2025-12", "2026-01"]
+
+
+def test_calendar_window_clamps_at_oldest_edge():
+    # anchor at min: prev arrow dead, window shows leading empty pre-data months
+    w = pivot._calendar_window("2025-01", 3, "2025-01", "2026-06")
+    assert w["months"] == ["2024-11", "2024-12", "2025-01"]
+    assert w["has_prev"] is False and w["has_next"] is True
+
+
+def test_calendar_window_single_column_and_short_history():
+    assert pivot._calendar_window("2026-03", 1, "2026-01", "2026-06")["months"] == ["2026-03"]
+    # data shorter than cols -> window padded with leading empty months
+    w = pivot._calendar_window("2026-03", 4, "2026-02", "2026-03")
+    assert w["months"] == ["2025-12", "2026-01", "2026-02", "2026-03"]
+
+
+def test_calendar_window_empty_extent_is_safe():
+    w = pivot._calendar_window(None, 3, None, None)
+    assert w == {"months": [], "has_prev": False, "has_next": False}
+
+
+def test_resolve_anchor_unbounded_all_stays_put():
+    # switching to "All" (no `to`) must NOT move the viewport
+    assert pivot._resolve_anchor("2026-03", None, 3, "2025-01", "2026-06") == "2026-03"
+    # ...but with no current anchor yet (initial load) fall back to most-recent
+    assert pivot._resolve_anchor(None, None, 3, "2025-01", "2026-06") == "2026-06"
+
+
+def test_resolve_anchor_gentle_when_filter_month_already_visible():
+    # filter.to month is inside the current viewport -> don't move (gentle rule)
+    assert pivot._resolve_anchor("2026-06", "2026-05-10", 3, "2025-01", "2026-06") == "2026-06"
+
+
+def test_resolve_anchor_jumps_when_filter_month_offscreen():
+    # filter.to month not visible -> re-anchor right edge to it
+    assert pivot._resolve_anchor("2026-06", "2026-01-10", 3, "2025-01", "2026-06") == "2026-01"
+
+
+def test_resolve_anchor_clamps_filter_outside_data_extent():
+    # filter far in the future -> clamp target into [min,max]; here that target
+    # (max month) is already visible, so the viewport stays put
+    assert pivot._resolve_anchor("2026-06", "2030-01-10", 3, "2025-01", "2026-06") == "2026-06"
+
+
+def test_resolve_anchor_no_data_returns_none():
+    assert pivot._resolve_anchor(None, "2026-01-10", 3, None, None) is None
+
+
+def test_build_html_wires_calendar_viewport():
+    rt = _rt("2026-05-20", "2026-05-20", 50, tid="E1")
+    stats = {"round_trips": 1, "unmatched_close_qty": 0, "still_open_qty": 0}
+    html = pivot.build_html([rt], stats)
+    # viewport arrows present + wired view-only (pageCal), and the JS mirrors exist
+    assert 'id="calPrev"' in html and 'id="calNext"' in html
+    assert "function pageCal" in html and "function calWindow" in html and "function resolveAnchor" in html
+    assert "filteredNoDate" in html        # calendar decoupled from the date filter
