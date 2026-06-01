@@ -22,6 +22,8 @@ CLI: python -m src.pivot [--db PATH] [--out PATH]
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
 import os
 import subprocess
@@ -170,6 +172,7 @@ _PAGE_CSS = """
 
  #detailFilter{font-size:12px;padding:3px 6px;width:280px;max-width:100%;margin:4px 0}
  #detailCount{font-size:11px;color:#888;margin-left:10px}
+ #detailExport{font-size:12px;padding:3px 8px;margin-left:10px;cursor:pointer}
  .scroll-x{overflow-x:auto;max-width:100%}
  .row-idx{color:#aaa;text-align:right;font-variant-numeric:tabular-nums;
    width:1%;white-space:nowrap;padding-left:8px;padding-right:8px}
@@ -775,6 +778,36 @@ _APP_JS = r"""
     });
   }
 
+  // --- CSV export (Tier-2): download exactly the rows currently visible in
+  // the detail table — filter + substring + sort all applied (WYSIWYG). Logic
+  // mirror of Python _detail_csv (the unit-tested source of truth). RFC-4180
+  // quoting + UTF-8 BOM (﻿, so Excel reads CJK notes), CRLF terminators.
+  // Emits raw underlying values, NOT the display-formatted P&L — a spreadsheet
+  // wants the number 1234.5, not "+$1,234.50".
+  function csvField(v){
+    var s = (v==null) ? '' : String(v);
+    return /[",\r\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+  }
+  function toCSV(rows){
+    var head = COLS.map(function(c){ return csvField(c[1]); }).join(',');
+    var body = rows.map(function(r){
+      return COLS.map(function(c){ return csvField(r[c[0]]); }).join(',');
+    });
+    return '﻿' + [head].concat(body).join('\r\n') + '\r\n';
+  }
+  function exportDetailCsv(){
+    var rows = detailRows();
+    var name = (filterState.from && filterState.to)
+      ? 'traderlens_'+filterState.from+'_'+filterState.to+'.csv'
+      : 'traderlens_all.csv';
+    var blob = new Blob([toCSV(rows)], {type:'text/csv;charset=utf-8'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  }
+
   // --- pivot (PivotTable.js) — only the FR-PIVOT-4.4 dims draggable ---
   function initPivot(){
     var hidden=Object.keys(DATA[0]||{}).filter(function(k){return CFG.dims.indexOf(k)<0;});
@@ -806,6 +839,9 @@ _APP_JS = r"""
 
   function boot(){
     LIFETIME = computeKpis(DATA);   // Tier-1 #6 — full-DATA baseline, never re-filtered.
+    // Wire CSV export before the empty-DATA bail-out so the button is live even
+    // on an empty archive (it just downloads a header-only file — no crash).
+    $sel('detailExport').onclick = exportDetailCsv;
     if(!DATA.length){
       $sel('calendar').innerHTML="<p class='muted'>No round-trips.</p>";
       syncChipActive();  // mark "All" active even when empty
@@ -906,6 +942,39 @@ def _record(rt: RoundTrip, tag_code: str, tag_name: str,
         "OpenPx": rt.open_price,
         "ClosePx": rt.close_price,
     }
+
+
+# --- detail-table CSV export (Tier-2) ---
+# Columns surfaced in the browser "Download CSV" — a logic mirror of the JS
+# `COLS` array in _APP_JS (keep the two in sync). (record-key, header label).
+# Same set/order the detail table shows on screen.
+_DETAIL_COLS = (
+    ("CloseDate", "Close date"), ("CloseTime", "Close time"),
+    ("OpenDate", "Open date"), ("OpenTime", "Open time"),
+    ("Setup", "Setup"), ("Class", "Class"), ("Underlying", "Sym"),
+    ("Direction", "Dir"), ("Result", "Result"), ("Session", "Session"),
+    ("EntryDOW", "DOW"), ("HoldBucket", "Hold"), ("Qty", "Qty"),
+    ("PnL_USD", "P&L"), ("Hold_min", "Hold(m)"), ("Score", "Score"),
+    ("Notes", "Notes"),
+)
+
+
+def _detail_csv(records: list[dict]) -> str:
+    """Serialize detail records to a CSV string for the in-browser download.
+
+    Source-of-truth mirror of the JS `toCSV` (unit-tested here; the JS side is
+    verified visually). Header = the labels in `_DETAIL_COLS`, one row per
+    record in the given order. RFC-4180 quoting (stdlib csv handles `,` `"`
+    newlines), CRLF terminators, and a leading UTF-8 BOM so Excel reads CJK
+    notes without mojibake. None / missing values become empty cells. Raw
+    underlying values are emitted (numbers stay numeric) — a spreadsheet wants
+    `1234.5`, not the display-formatted `+$1,234.50`."""
+    buf = io.StringIO()
+    w = csv.writer(buf)  # defaults: CRLF terminator + QUOTE_MINIMAL (RFC-4180)
+    w.writerow([label for _, label in _DETAIL_COLS])
+    for r in records:
+        w.writerow(["" if r.get(k) is None else r.get(k) for k, _ in _DETAIL_COLS])
+    return "﻿" + buf.getvalue()
 
 
 # --- KPI / drawdown / streak computation (Python; the headline + scoring) ---
@@ -1116,7 +1185,7 @@ def build_html(rts: list[RoundTrip], stats: dict,
 <div id="pivot"></div>
 
 <h2>Trade detail (click a header to sort)</h2>
-<input id="detailFilter" type="text" placeholder="filter rows (substring match)…"><span id="detailCount"></span>
+<input id="detailFilter" type="text" placeholder="filter rows (substring match)…"><span id="detailCount"></span><button id="detailExport" type="button" title="download the rows currently shown as CSV">⬇ CSV</button>
 <div id="detail" class="scroll-x"></div>
 
 <script>{jq}</script>

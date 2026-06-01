@@ -183,3 +183,91 @@ def test_generate_read_only_uses_ann_path_and_leaves_db_untouched(tmp_path):
     assert out_path.exists() and "var DATA" in out.read_text(encoding="utf-8")
     assert stats["round_trips"] == 1
     assert db.read_bytes() == snapshot   # read-only build did not mutate the DB
+
+
+# --- detail CSV export (Tier-2): Python source-of-truth for the browser
+# "Download CSV". The JS toCSV mirror is verified visually; the escaping /
+# column-order / BOM contract is locked here. ---
+
+def _csv_lines(text):
+    """Strip the BOM and split into CSV records on the CRLF terminator. An
+    embedded LF inside a quoted field is NOT a record boundary (csv uses \\r\\n),
+    so this split keeps such a field intact. Drops the trailing empty element
+    left by the final CRLF."""
+    assert text[0] == "﻿", "must start with a UTF-8 BOM (Excel CJK)"
+    return text[1:].split("\r\n")[:-1]
+
+
+def test_detail_csv_header_is_the_column_labels():
+    text = pivot._detail_csv([])
+    lines = _csv_lines(text)
+    assert len(lines) == 1   # header only when no records
+    assert lines[0] == ",".join(label for _, label in pivot._DETAIL_COLS)
+
+
+def test_detail_csv_uses_crlf_terminators():
+    # RFC-4180 + Excel friendliness: records end with CRLF, and the bare data
+    # contains no lone LF (the only LF allowed is one quoted inside a field).
+    text = pivot._detail_csv([{"Setup": "ORB"}])
+    assert text.endswith("\r\n")
+    assert "\n" not in text.replace("\r\n", "")   # no lone LF for plain records
+
+
+def test_detail_csv_emits_raw_values_in_column_order():
+    rec = {
+        "CloseDate": "2026-05-20", "CloseTime": "10:30:00",
+        "OpenDate": "2026-05-20", "OpenTime": "10:00:00",
+        "Setup": "ORB", "Class": "FUT", "Underlying": "MNQ",
+        "Direction": "LONG", "Result": "Win", "Session": "RTH",
+        "EntryDOW": "Wed", "HoldBucket": "0-30m", "Qty": 2,
+        "PnL_USD": 1234.5, "Hold_min": 30.0, "Score": 8.0, "Notes": "clean",
+        "open_trade_id": "IGNORE", "SetupCode": "IGNORE",   # extras dropped
+    }
+    row = _csv_lines(pivot._detail_csv([rec]))[1]
+    cells = row.split(",")
+    assert len(cells) == len(pivot._DETAIL_COLS)
+    # raw numeric P&L, not the display-formatted "+$1,234.50"
+    assert "1234.5" in cells and "+$" not in row
+    # column order follows _DETAIL_COLS, not dict insertion / alphabetical
+    assert cells[0] == "2026-05-20" and cells[4] == "ORB" and cells[-1] == "clean"
+
+
+def test_detail_csv_rfc4180_quoting():
+    # comma, embedded double-quote, and newline must all be quoted/escaped
+    recs = [
+        {"Notes": "a,b"},          # comma -> field quoted
+        {"Notes": 'say "hi"'},     # quote -> doubled + field quoted
+        {"Notes": "line1\nline2"}, # newline -> field quoted
+    ]
+    rows = _csv_lines(pivot._detail_csv(recs))[1:]
+    notes_idx = [k for k, _ in pivot._DETAIL_COLS].index("Notes")
+    # comma case: the quoted field keeps the comma inside one cell
+    assert rows[0].endswith('"a,b"')
+    # quote case: " -> ""
+    assert '"say ""hi"""' in rows[1]
+    # newline case: the record spans two physical lines but is one CSV record;
+    # _csv_lines split on CRLF, so the embedded LF keeps both halves together
+    joined = "\r\n".join(_csv_lines(pivot._detail_csv([recs[2]]))[1:])
+    assert '"line1\nline2"' in joined
+
+
+def test_detail_csv_none_and_missing_become_empty():
+    # Score=None (unscored) and a wholly absent key both render as empty cells
+    text = pivot._detail_csv([{"Setup": "ORB", "Score": None}])
+    cells = _csv_lines(text)[1].split(",")
+    cols = [k for k, _ in pivot._DETAIL_COLS]
+    assert cells[cols.index("Score")] == ""      # explicit None -> empty
+    assert cells[cols.index("Qty")] == ""        # missing key -> empty
+
+
+def test_detail_csv_preserves_cjk_notes():
+    text = pivot._detail_csv([{"Notes": "突破回踩，干净"}])
+    assert "突破回踩，干净" in text   # full-width comma is inside the note, not a delimiter
+
+
+def test_build_html_wires_csv_export_button():
+    rt = _rt("2026-05-20", "2026-05-20", 50, tid="E1")
+    stats = {"round_trips": 1, "unmatched_close_qty": 0, "still_open_qty": 0}
+    html = pivot.build_html([rt], stats)
+    assert 'id="detailExport"' in html          # the button exists
+    assert "exportDetailCsv" in html and "function toCSV" in html   # wired + mirror present
