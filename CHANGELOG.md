@@ -13,6 +13,89 @@ The CSV export schema carries its own independent version (v1.0,
 
 _No changes yet._
 
+## [1.2.0] - 2026-06-03
+
+Local pivot analytics gains two user-facing features — a windowed
+calendar and one-click detail CSV export — plus multi-fill order
+coalescing across the pivot and the MTS export.
+
+### Added — Pivot analytics
+
+- **Calendar windowed viewport** (FR-PIVOT-8) — the calendar now shows
+  one month at a time with a constant column width and stable layout,
+  instead of stretching across the whole history. `←` / `→` step through
+  months as a pure view change (no data recompute); changing a filter
+  gently re-anchors to a month that has data rather than landing on a
+  blank window. Driven by pure functions `_calendar_window` /
+  `_resolve_anchor` (unit-tested).
+- **Detail CSV export** (FR-PIVOT-4.5) — a `⬇ CSV` button on the detail
+  table downloads the *currently filtered* rows as CSV (client-side
+  Blob, no server, respects the active filter state).
+
+### Added — Pipeline
+
+- **Multi-fill order coalescing** (FR-PIVOT-2c) — multiple fills of a
+  single order now collapse into one trade (quantity-weighted VWAP,
+  keyed on `order_id` with a same-second fallback; mixed
+  side / open-close / date are refused). Applied before round-trip
+  pairing in both the pivot and the exporter. The MTS CSV export is now
+  order-level (one row per order, total quantity) — the 12-column v1.0
+  schema is unchanged, so downstream consumers need no changes.
+- **Activity self-heal upsert** — the T+1 Activity feed now backfills
+  `order_id` and unifies native IB fields on existing rows via
+  `ON CONFLICT DO UPDATE`; same-day Confirmation rows stay
+  `INSERT OR IGNORE` and never overwrite. User/audit columns
+  (annotations, category, timestamps) are never touched.
+
+### Added — Documentation
+
+- Bilingual README — [`README_cn.md`](README_cn.md) (中文) cross-linked
+  with the English README as a dual-language front door.
+
+### Changed
+
+- Pivot header revamp — two-column header layout and a wider equity
+  curve (860 → 1180 px). `pivot.generate()` gains a read-only mode so the
+  demo renders with zero side effects on the source database.
+
+### Fixed
+
+- Calendar rendered on a single squashed row in some reports
+  (`.cal-wrap` now `nowrap` + `overflow-x`).
+
+## [1.1.0] - 2026-05-29
+
+Humanises the public face of TraderLens and adds first-class
+macOS + Linux support. 100% backward compatible — no `src/` changes;
+every existing Windows entry point is unchanged.
+
+### Added
+
+- macOS + Linux first-class support: bash wrappers
+  ([`scripts/run_ib_sync.sh`](scripts/run_ib_sync.sh),
+  [`scripts/review.sh`](scripts/review.sh)), a macOS launchd installer
+  ([`scripts/install-launchd-task.sh`](scripts/install-launchd-task.sh),
+  idempotent + timezone-agnostic), and documented `cron` / `systemd
+  timer` templates. Executable bit (`100755`) set in the git index.
+- Zero-setup [`demo.html`](demo.html) — a top-level, ~440 KB
+  self-contained file (jQuery + PivotTable.js inlined). Double-click to
+  open; no Python, no broker token, and it never touches `data/`.
+
+### Changed
+
+- README user-value rewrite — "Who is this for?", a "Privacy and data
+  ownership" section listing every network call, and a broker-agnostic
+  roadmap (Interactive Brokers reframed as the first adapter).
+- Stronger [DISCLAIMER](DISCLAIMER.md) — a "Data integrity and other
+  software" section, plus an explicit acceptance line in the README.
+- MTS cross-project plumbing relocated from public `docs/specs/` to
+  private local storage (off-GitHub, zero loss).
+
+### CI
+
+- New `lint-line-endings` job preventing CRLF/LF mismatch from breaking
+  `.bat` / `.ps1` / `.sh` scripts.
+
 ## [1.0.0] - 2026-05-28
 
 Initial public release.
