@@ -41,7 +41,7 @@ from .constants import (
     PROJECT_ROOT,
     SQLITE_PATH,
 )
-from .roundtrip import RoundTrip, pair_round_trips
+from .roundtrip import RoundTrip, coalesce_fills, pair_round_trips
 
 VENDOR = PROJECT_ROOT / "assets" / "vendor"
 DEFAULT_OUT = PROJECT_ROOT / "reports" / "pivot_latest.html"
@@ -1326,7 +1326,7 @@ def generate(db_path: str | Path = SQLITE_PATH, out: str | Path = DEFAULT_OUT,
         rows = sqlite_store.query_all(conn)
     finally:
         conn.close()
-    rts, stats = pair_round_trips(rows)
+    rts, stats = pair_round_trips(coalesce_fills(rows))  # FR-PIVOT-2c: order = one trade
     anns = annotations.load_annotations(ann_path)
     cfg = annotations.load_tag_config()
     out_path = Path(out)
@@ -1345,7 +1345,7 @@ def write_template(db_path: str | Path = SQLITE_PATH,
         rows = sqlite_store.query_all(conn)
     finally:
         conn.close()
-    rts, _ = pair_round_trips(rows)
+    rts, _ = pair_round_trips(coalesce_fills(rows))  # FR-PIVOT-2c: one row per order
     return annotations.write_tag_template(rts, out)
 
 

@@ -1,13 +1,13 @@
 """Export SQLite -> 12-col v1.0 csv for the MTS project (FR-EXPORT).
 
-State machine (INTERFACE_CONTRACT §5.6 v1.1 2026-05-26, see DATA_ARCHITECTURE §5):
-  State A — no IB_Sync setup_tag annotation touches this trade_date
-            → all target-future legs for the date, category=PAPER_AUTO
-            → MTS routes 0-candidate to DC default-skip (scheme-E behavior)
-  State B — at least one round-trip touching this date has a resolved
-            setup_tag ∈ MTS_RELEVANT_SETUPS (currently {Q_intraday})
-            → only legs from those MTS-confirmed round-trips, category=MTS_CONFIRMED
-            → MTS routes 0-candidate to FORCE_WRITTEN with alert
+State machine (INTERFACE_CONTRACT 搂5.6 v1.1 2026-05-26, see DATA_ARCHITECTURE 搂5):
+  State A 鈥?no IB_Sync setup_tag annotation touches this trade_date
+            鈫?all target-future legs for the date, category=PAPER_AUTO
+            鈫?MTS routes 0-candidate to DC default-skip (scheme-E behavior)
+  State B 鈥?at least one round-trip touching this date has a resolved
+            setup_tag 鈭?MTS_RELEVANT_SETUPS (currently {Q_intraday})
+            鈫?only legs from those MTS-confirmed round-trips, category=MTS_CONFIRMED
+            鈫?MTS routes 0-candidate to FORCE_WRITTEN with alert
 
 State is decided independently per trade_date. csv schema is still v1.0 frozen
 (12 cols); only the content scope + category value change with state.
@@ -40,7 +40,7 @@ from .constants import (
     TARGET_UNDERLYINGS,
 )
 from .parser import TradeRow
-from .roundtrip import RoundTrip, pair_round_trips
+from .roundtrip import RoundTrip, coalesce_fills, pair_round_trips
 
 
 @dataclass(frozen=True)
@@ -82,21 +82,25 @@ def to_csv_record(row: TradeRow, category: str) -> dict[str, str]:
         "underlying": row.underlying,
         "expiry": row.expiry[:6],            # YYYYMMDD -> YYYYMM (csv v1.0 contract)
         "buy_sell": row.buy_sell,
-        "quantity": str(abs(row.quantity)),  # unsigned per §2.3 #7
+        "quantity": str(abs(row.quantity)),  # unsigned per 搂2.3 #7
         "trade_price": f"{row.trade_price:.2f}",
-        # NULL commission (rare IB omission) -> empty string; MTS treats as 0 (REQUIREMENTS §6)
+        # NULL commission (rare IB omission) -> empty string; MTS treats as 0 (REQUIREMENTS 搂6)
         "ib_commission": "" if row.ib_commission is None else f"{row.ib_commission:.2f}",
         "open_close": row.open_close,
         "category": category,                 # state-machine driven (C7)
-        "notes": row.notes or "",
+        # notes = USER notes only (搂5.6 C16). row.notes carries IB trade-CODES
+        # (O/C/P) 鈥?never export those into the user-notes column. v1 has no
+        # user-notes source (GSheet is v2), so this is empty. The `P` partial
+        # code is used internally for verification (coalesce), not shipped.
+        "notes": "",
     }
 
 
 def write_csv(path: Path, records: list[dict[str, str]]) -> None:
     """Write 12-col csv: UTF-8 (no BOM), LF line endings, RFC 4180.
 
-    Always writes the file (header always written), even with zero records —
-    a header-only csv is valid per INTERFACE_CONTRACT §5.6 C10 (MTS silently
+    Always writes the file (header always written), even with zero records 鈥?
+    a header-only csv is valid per INTERFACE_CONTRACT 搂5.6 C10 (MTS silently
     exits 0 on it; State B with all RTs filtered out / non-trading day)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="") as fh:
@@ -115,16 +119,22 @@ def _confirmed_leg_ids(
     """Walk all round-trips, resolve setup_tag, collect leg trade_ids belonging
     to MTS-confirmed RTs. Returns (open_trade_ids, close_trade_ids).
 
-    A single close leg can split across multiple opens (FIFO), so its trade_id
-    may appear in many RTs. We deduplicate by collecting into sets — if ANY
-    RT containing that close leg is MTS-confirmed, the close leg goes to csv."""
+    A single close leg can split across multiple opens (FIFO), so its key
+    may appear in many RTs. We deduplicate by collecting into sets 鈥?if ANY
+    RT containing that close leg is MTS-confirmed, the close leg goes to csv.
+
+    Keys on the ORDER id (FR-PIVOT-2c / agent BUG-1), falling back to the
+    representative trade_id when order_id is absent. The order id is stable
+    across the full-set vs per-date coalescing paths (a cross-date order is
+    refused by the full-set merge but merged per-date 鈥?keying on the
+    representative trade_id would then mismatch and silently drop the order)."""
     open_ids: set[str] = set()
     close_ids: set[str] = set()
     for rt in round_trips:
         tag = resolve_setup_tag(rt.open_trade_id, rt.order_ref, annotations, tag_config)
         if tag in MTS_RELEVANT_SETUPS:
-            open_ids.add(rt.open_trade_id)
-            close_ids.add(rt.close_trade_id)
+            open_ids.add(rt.open_order_id or rt.open_trade_id)
+            close_ids.add(rt.close_order_id or rt.close_trade_id)
     return open_ids, close_ids
 
 
@@ -170,23 +180,28 @@ def export_date(
             r for r in sqlite_store.query_all(conn)
             if r.asset_type == "FUT" and r.underlying in underlyings
         ]
-        round_trips, _ = pair_round_trips(all_legs)
+        round_trips, _ = pair_round_trips(coalesce_fills(all_legs))  # FR-PIVOT-2c
 
     confirmed_dates = _dates_touched_by_confirmed_rts(round_trips, annotations, tag_config)
     state = "B" if date_str in confirmed_dates else "A"
     category = CSV_CATEGORY_MTS_CONFIRMED if state == "B" else CSV_CATEGORY_PAPER_AUTO
 
+    # FR-PIVOT-2c: coalesce this date's fills into order-level legs (one row per
+    # order). Deterministic min(tradeID) representative matches the ids in
+    # round_trips (also coalesced), so the State-B filter aligns across paths.
+    date_legs = coalesce_fills(sqlite_store.query_for_export(conn, date_str, underlyings))
     if state == "A":
-        # State A — scheme-E behavior: all target-future legs for this date.
-        target_legs = sqlite_store.query_for_export(conn, date_str, underlyings)
+        # State A 鈥?scheme-E behavior: all target-future ORDERS for this date.
+        target_legs = date_legs
     else:
-        # State B — only legs from MTS-confirmed RTs that fall on this date.
+        # State B 鈥?only orders from MTS-confirmed RTs that fall on this date.
         open_ids, close_ids = _confirmed_leg_ids(round_trips, annotations, tag_config)
-        all_target_for_date = sqlite_store.query_for_export(conn, date_str, underlyings)
+        # Match on the order id (fallback to representative trade_id), aligned
+        # with _confirmed_leg_ids 鈥?see BUG-1 note there.
         target_legs = [
-            r for r in all_target_for_date
-            if (r.open_close == "O" and r.trade_id in open_ids)
-            or (r.open_close == "C" and r.trade_id in close_ids)
+            r for r in date_legs
+            if (r.open_close == "O" and (r.order_id or r.trade_id) in open_ids)
+            or (r.open_close == "C" and (r.order_id or r.trade_id) in close_ids)
         ]
 
     records = [to_csv_record(r, category) for r in target_legs]
@@ -222,11 +237,11 @@ def export_lookback(
     """Re-export csv for the last `lookback_days` trade_dates (C8/C9 contract).
 
     Pairs once across the full SQLite, then calls export_date per date sharing
-    the pairing — avoids O(N²) re-pairing per date. `lookback_days=None` is the
+    the pairing 鈥?avoids O(N虏) re-pairing per date. `lookback_days=None` is the
     'all' mode (every distinct trade_date in SQLite).
 
     Each date in the window gets a csv written, even if empty (header-only per
-    C10) — wrapper.bat can blind-loop the same window when calling MTS."""
+    C10) 鈥?wrapper.bat can blind-loop the same window when calling MTS."""
     annotations = annotations_mod.load_annotations()
     tag_config = annotations_mod.load_tag_config()
 
@@ -234,7 +249,7 @@ def export_lookback(
         r for r in sqlite_store.query_all(conn)
         if r.asset_type == "FUT" and r.underlying in underlyings
     ]
-    round_trips, _ = pair_round_trips(all_legs)
+    round_trips, _ = pair_round_trips(coalesce_fills(all_legs))  # FR-PIVOT-2c
 
     # Decide which trade_dates to export.
     today = today or date.today()

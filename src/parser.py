@@ -41,17 +41,20 @@ class SourceProfile:
     commission_attr: str
     openclose_attr: str
     fifo_attr: str | None   # None when the statement type has no realized-PnL field
+    order_id_attr: str      # FR-PIVOT-2c: AF `ibOrderID` vs TCF `orderID`
 
 
 ACTIVITY_PROFILE = SourceProfile(
     name="ACTIVITY", row_tag="Trade",
     price_attr="tradePrice", commission_attr="ibCommission",
     openclose_attr="openCloseIndicator", fifo_attr="fifoPnlRealized",
+    order_id_attr="ibOrderID",
 )
 CONFIRMATION_PROFILE = SourceProfile(
     name="CONFIRMATION", row_tag="TradeConfirm",
     price_attr="price", commission_attr="commission",
     openclose_attr="code", fifo_attr=None,
+    order_id_attr="orderID",
 )
 
 # Critical attributes — a row without these is unusable (skip the trade).
@@ -80,7 +83,7 @@ class StmtMeta:
 
 @dataclass(frozen=True)
 class TradeRow:
-    """20-col SQLite row (matches REQUIREMENTS FR-STORE-2 + data_source + order_ref)."""
+    """21-col SQLite row (matches REQUIREMENTS FR-STORE-2 + data_source + order_ref + order_id)."""
 
     # IB native (12)
     trade_id: str
@@ -113,6 +116,12 @@ class TradeRow:
     # alias source. Optional (None when absent / manual orders). Default keeps
     # pre-FR-PIVOT TradeRow constructors working.
     order_ref: str | None = None
+    # Order id (1) — Flex `ibOrderID` (Activity) / `orderID` (Confirmation),
+    # profile-driven (FR-PIVOT-2c). The canonical key that groups an order's
+    # partial fills; 100% present (orderReference is not — half are empty).
+    # Used only by the derived coalescing layer; kept raw in the fact table.
+    # Optional/default keeps pre-FR-PIVOT-2c TradeRow constructors working.
+    order_id: str | None = None
 
 
 # --- field conversion helpers (each unit-tested) ---
@@ -263,7 +272,41 @@ def parse_trades(
                         profile.row_tag, a.get("tradeID"), exc)
     if skipped:
         log.warning("Parsed %d trades, skipped %d malformed", len(rows), skipped)
+    _verify_order_totals(root, rows, profile)
     return rows
+
+
+def _verify_order_totals(root, rows: list[TradeRow], profile: SourceProfile) -> None:
+    """`<Order>` oracle (FR-PIVOT-2c): IB emits order-level rows
+    (levelOfDetail=ORDER) carrying the order's total quantity. Cross-check that
+    Σ(execution quantity per order_id) == the Order row's quantity, and WARN on
+    any mismatch — this catches a mis-configured Flex Query (e.g. ibOrderID not
+    selected) or an unexpected fill-grouping anomaly before it corrupts the
+    coalesced output. Best-effort + observability only: never raises, never
+    blocks the batch. Feeds without `<Order>` rows simply skip the check."""
+    exec_sum: dict[str, int] = {}
+    for r in rows:
+        if r.order_id:
+            exec_sum[r.order_id] = exec_sum.get(r.order_id, 0) + r.quantity
+    mismatches = 0
+    for o in root.iter("Order"):
+        if o.get("levelOfDetail") != "ORDER":
+            continue
+        oid = o.get(profile.order_id_attr)
+        if not oid or oid not in exec_sum:
+            continue
+        try:
+            order_qty = int(o.get("quantity"))
+        except (TypeError, ValueError):
+            continue
+        if order_qty != exec_sum[oid]:
+            mismatches += 1
+            log.warning(
+                "[WARN] order-total oracle mismatch: order %s Σ(fills)=%d != <Order>.quantity=%d "
+                "— check Flex field config / fill grouping", oid, exec_sum[oid], order_qty,
+            )
+    if mismatches:
+        log.warning("[WARN] %d order(s) failed the <Order> quantity oracle", mismatches)
 
 
 def _build_row(a: dict, *, profile: SourceProfile, run_id: str, now_utc: str) -> TradeRow:
@@ -298,6 +341,7 @@ def _build_row(a: dict, *, profile: SourceProfile, run_id: str, now_utc: str) ->
             source_run_id=run_id,
             data_source=profile.name,
             order_ref=_norm_optional(a.get("orderReference")),  # shared AF/TCF attr
+            order_id=_norm_optional(a.get(profile.order_id_attr)),  # FR-PIVOT-2c (profile-driven)
         )
     except (ValueError, TypeError) as exc:
         # e.g. non-numeric quantity/price/commission

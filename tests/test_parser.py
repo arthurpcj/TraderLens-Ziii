@@ -123,3 +123,87 @@ def test_order_ref_parsed_from_orderreference():
     # absent attribute -> None (manual orders carry no reference)
     none_ref = parse_trades(af_xml(af_trade(orderReference=None)))
     assert none_ref[0].order_ref is None
+
+
+# --- order_id capture + <Order> quantity oracle (FR-PIVOT-2c) ---
+
+def _activity_xml(order_qty, fills):
+    """Minimal Activity XML: one <Order> + N <Trade> EXECUTION fills sharing ibOrderID."""
+    trades = "".join(
+        f'<Trade tradeID="{t}" tradeDate="20260525" dateTime="20260525;093115" '
+        f'underlyingSymbol="MES" buySell="BUY" quantity="{q}" tradePrice="20100.0" '
+        f'ibCommission="-0.62" openCloseIndicator="O" expiry="20260618" multiplier="5" '
+        f'ibOrderID="OE" assetCategory="FUT"/>'
+        for t, q in fills
+    )
+    return (
+        '<FlexQueryResponse><FlexStatements><FlexStatement><Trades>'
+        f'<Order ibOrderID="OE" quantity="{order_qty}" levelOfDetail="ORDER"/>'
+        f'{trades}'
+        '</Trades></FlexStatement></FlexStatements></FlexQueryResponse>'
+    ).encode()
+
+
+def test_order_id_captured_activity():
+    from src.parser import parse_trades, ACTIVITY_PROFILE
+    rows = parse_trades(_activity_xml(2, [("T1", 1), ("T2", 1)]),
+                        run_id="r", now_utc="z", profile=ACTIVITY_PROFILE)
+    assert {r.order_id for r in rows} == {"OE"}
+
+
+def test_order_oracle_matches_no_warn(caplog):
+    from src.parser import parse_trades, ACTIVITY_PROFILE
+    with caplog.at_level("WARNING"):
+        parse_trades(_activity_xml(2, [("T1", 1), ("T2", 1)]),
+                     run_id="r", now_utc="z", profile=ACTIVITY_PROFILE)
+    assert "oracle mismatch" not in caplog.text
+
+
+def test_order_oracle_mismatch_warns(caplog):
+    from src.parser import parse_trades, ACTIVITY_PROFILE
+    with caplog.at_level("WARNING"):
+        parse_trades(_activity_xml(3, [("T1", 1), ("T2", 1)]),   # Order says 3, fills sum 2
+                     run_id="r", now_utc="z", profile=ACTIVITY_PROFILE)
+    assert "oracle mismatch" in caplog.text
+
+
+def test_confirmation_multifill_order_id():
+    # Agent C-5: fabricated TCF multi-fill (no real sample) — orderID groups fills.
+    from src.parser import parse_trades, CONFIRMATION_PROFILE
+    xml = (
+        '<FlexQueryResponse><FlexStatements><FlexStatement><TradeConfirms>'
+        '<Order orderID="OC" quantity="2" levelOfDetail="ORDER"/>'
+        '<TradeConfirm tradeID="C1" orderID="OC" tradeDate="20260525" dateTime="20260525;093115" '
+        'underlyingSymbol="MES" buySell="BUY" quantity="1" price="20100.0" commission="-0.62" '
+        'code="O" expiry="20260618" multiplier="5" levelOfDetail="EXECUTION"/>'
+        '<TradeConfirm tradeID="C2" orderID="OC" tradeDate="20260525" dateTime="20260525;093118" '
+        'underlyingSymbol="MES" buySell="BUY" quantity="1" price="20100.5" commission="-0.62" '
+        'code="O" expiry="20260618" multiplier="5" levelOfDetail="EXECUTION"/>'
+        '</TradeConfirms></FlexStatement></FlexStatements></FlexQueryResponse>'
+    ).encode()
+    rows = parse_trades(xml, run_id="r", now_utc="z", profile=CONFIRMATION_PROFILE)
+    assert len(rows) == 2 and {r.order_id for r in rows} == {"OC"}
+    from src.roundtrip import coalesce_fills
+    merged = coalesce_fills(rows)
+    assert len(merged) == 1 and merged[0].quantity == 2   # TCF fills coalesce by orderID
+
+
+def test_order_oracle_signed_negative_quantity_no_false_warn(caplog):
+    # Real SELL orders have negative quantity; oracle must compare signed totals.
+    from src.parser import parse_trades, ACTIVITY_PROFILE
+    xml = (
+        '<FlexQueryResponse><FlexStatements><FlexStatement><Trades>'
+        '<Order ibOrderID="OS" quantity="-4" levelOfDetail="ORDER"/>'
+        '<Trade tradeID="S1" tradeDate="20260525" dateTime="20260525;093115" '
+        'underlyingSymbol="MES" buySell="SELL" quantity="-1" tradePrice="20100.0" '
+        'ibCommission="-0.4" openCloseIndicator="C" expiry="20260618" multiplier="5" ibOrderID="OS"/>'
+        '<Trade tradeID="S2" tradeDate="20260525" dateTime="20260525;093627" '
+        'underlyingSymbol="MES" buySell="SELL" quantity="-3" tradePrice="20100.0" '
+        'ibCommission="-1.2" openCloseIndicator="C" expiry="20260618" multiplier="5" ibOrderID="OS"/>'
+        '</Trades></FlexStatement></FlexStatements></FlexQueryResponse>'
+    ).encode()
+    with caplog.at_level("WARNING"):
+        rows = parse_trades(xml, run_id="r", now_utc="z", profile=ACTIVITY_PROFILE)
+    assert "oracle mismatch" not in caplog.text     # -1 + -3 == -4 (signed)
+    from src.roundtrip import coalesce_fills
+    assert coalesce_fills(rows)[0].quantity == -4

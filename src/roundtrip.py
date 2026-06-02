@@ -10,12 +10,15 @@ ADDED, never subtracted (matches INTERFACE_CONTRACT §3.1 G6 / §5.6 C5).
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict, deque
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from typing import Iterable
 
 from .parser import TradeRow
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,13 @@ class RoundTrip:
                                #   (a close leg can split across multiple opens, so
                                #   one close tradeID can map to multiple RTs)
     order_ref: str | None      # entry leg's orderReference — tier-2 setup_tag source
+    # FR-PIVOT-2c: the entry/exit ORDER id (ibOrderID/orderID). The MTS State-B
+    # export keys on this (falling back to the representative trade_id when None)
+    # so leg selection is stable across the full-set vs per-date coalescing paths
+    # (a cross-date order is refused by the full-set merge but merged per-date —
+    # order_id keys agree where representative trade_ids would not).
+    open_order_id: str | None = None
+    close_order_id: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -69,6 +79,7 @@ class _OpenLot:
     direction: str
     trade_id: str              # entry leg tradeID (-> RoundTrip.open_trade_id)
     order_ref: str | None      # entry leg orderReference (-> RoundTrip.order_ref)
+    order_id: str | None       # entry leg order_id (-> RoundTrip.open_order_id)
 
 
 def _dt(date_str: str, time_str: str) -> datetime:
@@ -169,7 +180,107 @@ def _build_round_trip(
         hold_bucket=_hold_bucket(hold_minutes),
         open_trade_id=lot.trade_id,
         order_ref=lot.order_ref,
+        open_order_id=lot.order_id,
+        close_order_id=close_leg.order_id,
     )
+
+
+# --- order-id fill coalescing (FR-PIVOT-2c) ---
+# IB reports executions (fills); one order can partial-fill into several. A
+# trader's "one trade" is one ORDER, not one fill. coalesce_fills merges an
+# order's fills into one synthetic leg BEFORE pairing/export, so a multi-fill
+# order counts as one round-trip (pivot) and exports as one order-level row
+# (MTS, INTERFACE_CONTRACT §5.6 2026-06-02). The fact layer stays raw; this is a
+# pure derived-layer projection. Broker-/asset-agnostic: see _instrument_key.
+
+def _instrument_key(row: TradeRow) -> tuple:
+    """Asset-class identity for the same-second fallback key (when order_id is
+    absent). Futures -> (underlying, expiry); stocks -> (underlying, None)
+    (expiry already None). Options later append (strike, put_call) here — the
+    single extension point. order_id grouping itself is asset-agnostic."""
+    return (row.underlying, row.expiry)
+
+
+def _coalesce_key(row: TradeRow):
+    """Primary key = order_id; fallback (order_id absent) = same-second identity.
+    Returns (kind, ...) so OID and heuristic keys never collide."""
+    if row.order_id:
+        return ("OID", row.order_id)
+    return ("HEU", _instrument_key(row), row.buy_sell, row.open_close,
+            row.trade_date, row.trade_time)
+
+
+def _merge_group(group: list[TradeRow]) -> TradeRow:
+    """Merge an order's fills into one leg. qty=Σ, price=qty-weighted VWAP,
+    commission/fifo=Σ (NULL-safe), time=first(open)/last(close), representative
+    trade_id=min(tradeID) (sort-independent → stable annotation key). Full
+    precision kept; rounding happens only at output. notes cleared (an aggregated
+    order is not a 'partial' fill — drops IB's `P` code)."""
+    rep = min(group, key=lambda r: r.trade_id)        # deterministic, order-independent
+    total_qty = sum(r.quantity for r in group)        # signed (all same side)
+    abs_qty = sum(abs(r.quantity) for r in group)
+    if abs_qty == 0:                                   # degenerate (all qty-0) — don't divide
+        return rep
+    vwap = sum(abs(r.quantity) * r.trade_price for r in group) / abs_qty
+    comms = [r.ib_commission for r in group if r.ib_commission is not None]
+    commission = sum(comms) if comms else None         # None iff ALL fills None
+    fifos = [r.fifo_pnl_realized for r in group if r.fifo_pnl_realized is not None]
+    fifo = sum(fifos) if fifos else None
+    # open order -> first fill; close order -> last fill (full position lifetime).
+    times = sorted(r.trade_time for r in group)
+    trade_time = times[0] if rep.open_close == "O" else times[-1]
+    return replace(
+        rep, quantity=total_qty, trade_price=vwap, ib_commission=commission,
+        fifo_pnl_realized=fifo, trade_time=trade_time, notes=None,
+    )
+
+
+def coalesce_fills(rows: Iterable[TradeRow]) -> list[TradeRow]:
+    """Group executions of one order into a single leg (FR-PIVOT-2c).
+
+    Pure. Single-fill orders pass through unchanged (object identity), so the
+    common case is byte-identical. Groups with mixed (buy_sell, open_close) or
+    trade_date are NOT merged (defensive: the 'one order = one side, one day'
+    invariant is not guaranteed — flip/GTC-rollover orders) -> emitted per-fill
+    with a WARN. A WARN also fires when order_id is absent (heuristic fallback)."""
+    buckets: dict = defaultdict(list)
+    order = []                                          # preserve first-seen bucket order
+    for r in rows:
+        k = _coalesce_key(r)
+        if k not in buckets:
+            order.append(k)
+        buckets[k].append(r)
+
+    out: list[TradeRow] = []
+    n_heuristic = 0
+    n_refused = 0
+    for k in order:
+        group = buckets[k]
+        if len(group) == 1:
+            out.append(group[0])
+            continue
+        if k[0] == "HEU":
+            n_heuristic += len(group)
+        # Defensive: refuse to merge a group that is not one-side / one-day.
+        if len({(r.buy_sell, r.open_close) for r in group}) > 1 or \
+           len({r.trade_date for r in group}) > 1:
+            n_refused += 1
+            out.extend(group)
+            continue
+        out.append(_merge_group(group))
+
+    if n_heuristic:
+        log.warning(
+            "[WARN] %d fills had no order_id -> same-second heuristic coalescing; "
+            "add ibOrderID/orderID to your Flex Query for accurate cross-minute fills",
+            n_heuristic,
+        )
+    if n_refused:
+        log.warning(
+            "[WARN] %d order-id group(s) had mixed side/open-close/date -> left un-merged "
+            "(unexpected; check the data)", n_refused,
+        )
+    return out
 
 
 def pair_round_trips(rows: Iterable[TradeRow]) -> tuple[list[RoundTrip], dict]:
@@ -203,7 +314,8 @@ def pair_round_trips(rows: Iterable[TradeRow]) -> tuple[list[RoundTrip], dict]:
                 direction = "LONG" if leg.buy_sell == "BUY" else "SHORT"
                 open_lots.append(
                     _OpenLot(qty, leg.trade_price, leg.trade_date, leg.trade_time,
-                             comm_per_unit, direction, leg.trade_id, leg.order_ref)
+                             comm_per_unit, direction, leg.trade_id, leg.order_ref,
+                             leg.order_id)
                 )
             else:  # closing leg
                 remaining = qty
