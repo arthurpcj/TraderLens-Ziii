@@ -1,5 +1,6 @@
 """AF + TCF coexistence in one SQLite table: dedup, mutual fill, and the
-current first-writer-wins behavior (NO self-heal yet — see data_schema.md).
+Activity self-heal (FR-PIVOT-2c): Activity (T+1 authoritative) heals an existing
+Confirmation (T+0 preliminary) row; Confirmation never clobbers Activity.
 
 Also an end-to-end scenario: mixed-source archive -> csv export, proving the
 export filter is source-agnostic (it keys on underlying/asset_type, not
@@ -29,20 +30,21 @@ def _ingest(conn, xml, profile):
 
 # --- dedup / first-writer-wins (the C2-overlap behavior) --------------------
 
-def test_tcf_then_af_same_id_dedups_keeps_confirmation():
+def test_tcf_then_af_activity_heals_confirmation():
     """Confirmation arrives first (evening); next-day Activity has the SAME
-    tradeID -> IGNORED. Row stays CONFIRMATION (no self-heal yet)."""
+    tradeID -> Activity HEALS it (T+1 authoritative final, FR-PIVOT-2c): the row
+    flips to ACTIVITY and takes AF's corrected value."""
     conn = _conn()
     _ingest(conn, tcf_xml(tcf_trade(tradeID="X", price="100.00", commission="-0.62")),
             CONFIRMATION_PROFILE)
-    # Activity later reports the same trade with a (hypothetically) corrected price.
+    # Activity later reports the same trade with a corrected price.
     s = _ingest(conn, af_xml(af_trade(tradeID="X", tradePrice="999.99")), ACTIVITY_PROFILE)
 
-    assert (s.inserted, s.ignored_dupes) == (0, 1)          # AF row ignored as dupe
+    assert (s.inserted, s.healed, s.ignored_dupes) == (0, 1, 0)   # AF heals the row
     rows = sqlite_store.query_all(conn)
     assert len(rows) == 1
-    assert rows[0].data_source == "CONFIRMATION"            # first writer wins
-    assert rows[0].trade_price == 100.00                    # preliminary value retained
+    assert rows[0].data_source == "ACTIVITY"               # Activity authoritative
+    assert rows[0].trade_price == 999.99                   # AF final value wins
     conn.close()
 
 
@@ -67,14 +69,15 @@ def test_disjoint_ids_union_both_sources():
     conn.close()
 
 
-def test_partial_overlap_inserts_only_new():
-    """Confirmation has {X,Y}; Activity has {X,Z} -> table = {X(conf),Y,Z}."""
+def test_partial_overlap_heals_x_inserts_z():
+    """Confirmation has {X,Y}; Activity has {X,Z} -> X healed to ACTIVITY, Z is
+    new, Y stays CONFIRMATION (FR-PIVOT-2c self-heal)."""
     conn = _conn()
     _ingest(conn, tcf_xml(tcf_trade(tradeID="X"), tcf_trade(tradeID="Y")), CONFIRMATION_PROFILE)
     s = _ingest(conn, af_xml(af_trade(tradeID="X"), af_trade(tradeID="Z")), ACTIVITY_PROFILE)
-    assert (s.attempted, s.inserted, s.ignored_dupes) == (2, 1, 1)  # only Z is new
+    assert (s.attempted, s.inserted, s.healed, s.ignored_dupes) == (2, 1, 1, 0)  # Z new, X healed
     by = {r.trade_id: r.data_source for r in sqlite_store.query_all(conn)}
-    assert by == {"X": "CONFIRMATION", "Y": "CONFIRMATION", "Z": "ACTIVITY"}
+    assert by == {"X": "ACTIVITY", "Y": "CONFIRMATION", "Z": "ACTIVITY"}
     conn.close()
 
 

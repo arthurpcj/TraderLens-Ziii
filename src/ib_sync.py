@@ -254,8 +254,8 @@ def _run_pipeline(
         sqlite_store.init_schema(conn)
         stats = sqlite_store.upsert_trades(conn, rows)
         log.info(
-            "[OK] fetched %d trades: %d new, %d dupes ignored",
-            stats.attempted, stats.inserted, stats.ignored_dupes,
+            "[OK] fetched %d trades: %d new, %d healed (order_id/fifo/etc backfill), %d dupes",
+            stats.attempted, stats.inserted, stats.healed, stats.ignored_dupes,
         )
 
         # 8. Advance last_success (FR-STATE-2) only after a clean fetch+store
@@ -397,7 +397,7 @@ def _run_confirmation_pipeline(
         sqlite_store.init_schema(conn)
         stats = sqlite_store.upsert_trades(conn, rows)
         log.info(
-            "[OK] confirmation ingest: %d rows, %d new, %d dupes ignored",
+            "[OK] confirmation ingest: %d rows, %d new, %d dupes ignored (preliminary, no clobber)",
             stats.attempted, stats.inserted, stats.ignored_dupes,
         )
         # Same-day csv export — Confirmation is the primary MTS feed.

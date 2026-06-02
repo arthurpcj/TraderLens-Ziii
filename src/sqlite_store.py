@@ -54,6 +54,7 @@ class UpsertStats:
     attempted: int
     inserted: int
     ignored_dupes: int
+    healed: int = 0          # existing rows refreshed by an Activity self-heal write
 
 
 def connect(db_path: str | Path, *, read_only: bool = False) -> sqlite3.Connection:
@@ -109,17 +110,61 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE trades ADD COLUMN order_id TEXT")
 
 
+# Fields NOT overwritten when Activity heals an existing row: the PK, the user/
+# local labels, and the creation audit. Everything else is IB-native and Activity
+# (the T+1 final record) is authoritative for it (FR-PIVOT-2c self-heal).
+_NO_HEAL: frozenset[str] = frozenset({
+    "trade_id", "category", "notes", "category_set_at", "row_created_at", "source_run_id",
+})
+
+
 def upsert_trades(conn: sqlite3.Connection, rows: Iterable[TradeRow]) -> UpsertStats:
-    """INSERT OR IGNORE on trade_id. Returns insert/dedup stats."""
+    """Ingest trades with source-aware reconciliation (FR-PIVOT-2c self-heal).
+
+    - **Confirmation** (T+0 preliminary) inserts NEW rows only (INSERT OR IGNORE) —
+      never clobbers an existing row.
+    - **Activity** (T+1 authoritative final) inserts new AND **heals** existing
+      rows' IB-native fields: backfills NULL `order_id` (old rows, e.g. cross-
+      minute M6B) and unifies cross-feed order ids to `ibOrderID`; fills
+      `fifo_pnl_realized` that TCF lacks; refreshes commission/price on IB
+      corrections; flips `data_source` to ACTIVITY. User labels + creation audit
+      are preserved (`_NO_HEAL`).
+
+    Idempotent (NFR-RELIABILITY-1): re-running Activity heals with identical
+    values, so table CONTENT converges/stays consistent."""
     rows = list(rows)
-    placeholders = ", ".join("?" for _ in _COLUMNS)
-    sql = f"INSERT OR IGNORE INTO trades ({', '.join(_COLUMNS)}) VALUES ({placeholders})"
-    before = conn.total_changes
-    conn.executemany(sql, [astuple(r) for r in rows])
+    cols = ", ".join(_COLUMNS)
+    ph = ", ".join("?" for _ in _COLUMNS)
+
+    ids = [r.trade_id for r in rows]
+    existing: set[str] = set()
+    if ids:
+        qm = ", ".join("?" for _ in ids)
+        existing = {row["trade_id"] for row in
+                    conn.execute(f"SELECT trade_id FROM trades WHERE trade_id IN ({qm})", ids)}
+
+    activity = [r for r in rows if r.data_source == "ACTIVITY"]
+    other = [r for r in rows if r.data_source != "ACTIVITY"]
+
+    if other:                                            # preliminary -> insert new only
+        conn.executemany(
+            f"INSERT OR IGNORE INTO trades ({cols}) VALUES ({ph})",
+            [astuple(r) for r in other],
+        )
+    if activity:                                         # authoritative -> insert new + heal
+        heal = ", ".join(f"{c}=excluded.{c}" for c in _COLUMNS if c not in _NO_HEAL)
+        conn.executemany(
+            f"INSERT INTO trades ({cols}) VALUES ({ph}) "
+            f"ON CONFLICT(trade_id) DO UPDATE SET {heal}",
+            [astuple(r) for r in activity],
+        )
     conn.commit()
-    inserted = conn.total_changes - before
-    attempted = len(rows)
-    return UpsertStats(attempted=attempted, inserted=inserted, ignored_dupes=attempted - inserted)
+
+    inserted = sum(1 for r in rows if r.trade_id not in existing)
+    healed = sum(1 for r in activity if r.trade_id in existing)
+    ignored_dupes = sum(1 for r in other if r.trade_id in existing)
+    return UpsertStats(attempted=len(rows), inserted=inserted,
+                       ignored_dupes=ignored_dupes, healed=healed)
 
 
 # Columns added by _migrate after the original schema. ONLY these may be absent
