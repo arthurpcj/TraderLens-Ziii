@@ -22,13 +22,14 @@ def rows(sample_xml_bytes):
     return parse_trades(sample_xml_bytes, run_id="RUN1", now_utc="2026-05-20T00:00:00+00:00")
 
 
-def test_schema_has_20_columns(conn):
+def test_schema_has_21_columns(conn):
     cols = conn.execute("PRAGMA table_info(trades)").fetchall()
-    assert len(cols) == 20  # 18 + data_source (spike-002) + order_ref (FR-PIVOT-2b)
+    assert len(cols) == 21  # 18 + data_source + order_ref + order_id (FR-PIVOT-2c)
     names = {c["name"] for c in cols}
     assert "asset_type" in names
     assert "data_source" in names
     assert "order_ref" in names
+    assert "order_id" in names
     # expiry nullable (stocks), fifo_pnl_realized nullable
     by_name = {c["name"]: c for c in cols}
     assert by_name["expiry"]["notnull"] == 0

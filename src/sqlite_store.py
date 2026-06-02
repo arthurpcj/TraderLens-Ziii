@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS trades (
     row_created_at     TEXT NOT NULL,
     source_run_id      TEXT NOT NULL,
     data_source        TEXT NOT NULL DEFAULT 'ACTIVITY',
-    order_ref          TEXT
+    order_ref          TEXT,
+    order_id           TEXT
 );
 """
 
@@ -101,6 +102,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         )
     if "order_ref" not in cols:
         conn.execute("ALTER TABLE trades ADD COLUMN order_ref TEXT")
+    # order_id (FR-PIVOT-2c): nullable, backfills to NULL on old rows (no
+    # ibOrderID/orderID recorded). The coalescing layer falls back to the
+    # same-second heuristic for NULL-order_id legs.
+    if "order_id" not in cols:
+        conn.execute("ALTER TABLE trades ADD COLUMN order_id TEXT")
 
 
 def upsert_trades(conn: sqlite3.Connection, rows: Iterable[TradeRow]) -> UpsertStats:
@@ -116,8 +122,24 @@ def upsert_trades(conn: sqlite3.Connection, rows: Iterable[TradeRow]) -> UpsertS
     return UpsertStats(attempted=attempted, inserted=inserted, ignored_dupes=attempted - inserted)
 
 
+# Columns added by _migrate after the original schema. ONLY these may be absent
+# in an old snapshot opened read-only (which skips _migrate); a missing REQUIRED
+# column is a real corruption and must surface, not be silently None.
+_ADDITIVE_COLS: frozenset[str] = frozenset({"data_source", "order_ref", "order_id"})
+
+
 def _row_to_traderow(row: sqlite3.Row) -> TradeRow:
-    return TradeRow(**{col: row[col] for col in _COLUMNS})
+    # Tolerant of additive columns absent in OLD snapshots opened read-only — e.g.
+    # order_id on a pre-FR-PIVOT-2c demo DB -> None (what _migrate would backfill).
+    # A missing required column is omitted -> TradeRow raises (surfaces the error).
+    keys = set(row.keys())
+    vals = {}
+    for col in _COLUMNS:
+        if col in keys:
+            vals[col] = row[col]
+        elif col in _ADDITIVE_COLS:
+            vals[col] = None
+    return TradeRow(**vals)
 
 
 def query_for_export(

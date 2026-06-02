@@ -5,18 +5,19 @@ from __future__ import annotations
 import pytest
 
 from src.parser import TradeRow
-from src.roundtrip import pair_round_trips
+from src.roundtrip import coalesce_fills, pair_round_trips
 
 
 def _leg(tid, date, time, bs, qty_signed, price, oc, *, underlying="MNQ",
-         expiry="20260618", mult=2, comm=-0.62, asset="FUT", order_ref=None):
+         expiry="20260618", mult=2, comm=-0.62, asset="FUT", order_ref=None,
+         order_id=None, fifo=None, notes=None):
     return TradeRow(
         trade_id=tid, trade_date=date, trade_time=time, underlying=underlying,
         expiry=expiry, buy_sell=bs, quantity=qty_signed, trade_price=price,
         multiplier=mult, ib_commission=comm, open_close=oc,
-        fifo_pnl_realized=None, asset_type=asset, category=None, notes=None,
+        fifo_pnl_realized=fifo, asset_type=asset, category=None, notes=notes,
         category_set_at=None, row_created_at="z", source_run_id="r",
-        order_ref=order_ref,
+        order_ref=order_ref, order_id=order_id,
     )
 
 
@@ -161,3 +162,125 @@ def test_unmatched_and_still_open_counted():
     assert rts == []
     assert stats["unmatched_close_qty"] == 1
     assert stats["still_open_qty"] == 1
+
+
+# --- order-id fill coalescing (FR-PIVOT-2c): C1-C15 with fabricated orders ---
+
+def test_coalesce_C1_single_fill_passthrough():
+    legs = [_leg("T1", "2026-05-20", "10:00:00", "BUY", 1, 100.0, "O", order_id="O1")]
+    out = coalesce_fills(legs)
+    assert out == legs and out[0] is legs[0]   # identity preserved (byte-identical case)
+
+
+def test_coalesce_C2_same_second_same_price_open():
+    legs = [_leg("T2", "2026-05-19", "12:30:53", "BUY", 1, 4.75, "O", order_id="O5"),
+            _leg("T1", "2026-05-19", "12:30:53", "BUY", 1, 4.75, "O", order_id="O5")]
+    out = coalesce_fills(legs)
+    assert len(out) == 1
+    m = out[0]
+    assert m.quantity == 2 and m.trade_price == 4.75
+    assert m.trade_id == "T1"               # min(tradeID), order-independent
+    assert m.trade_time == "12:30:53"
+
+
+def test_coalesce_C3_cross_minute_close_last_time():
+    legs = [_leg("T1", "2026-05-27", "04:54:43", "SELL", -1, 1.3635, "C", order_id="O9", comm=-0.41),
+            _leg("T2", "2026-05-27", "04:56:27", "SELL", -3, 1.3635, "C", order_id="O9", comm=-1.23)]
+    m = coalesce_fills(legs)[0]
+    assert m.quantity == -4
+    assert m.trade_time == "04:56:27"        # close -> LAST fill
+    assert m.ib_commission == pytest.approx(-1.64)   # summed
+
+
+def test_coalesce_C4_weighted_average_price():
+    legs = [_leg("T1", "2026-05-20", "09:31:15", "BUY", 1, 20100.25, "O", order_id="O1"),
+            _leg("T2", "2026-05-20", "09:31:18", "BUY", 3, 20100.75, "O", order_id="O1")]
+    m = coalesce_fills(legs)[0]
+    assert m.quantity == 4
+    assert m.trade_price == pytest.approx((1*20100.25 + 3*20100.75) / 4)   # qty-weighted
+
+
+def test_coalesce_C5_null_order_id_fallback_and_warn(caplog):
+    # same-second fills with NO order_id -> heuristic merge + WARN
+    legs = [_leg("T1", "2026-05-20", "09:31:15", "BUY", 1, 100.0, "O"),
+            _leg("T2", "2026-05-20", "09:31:15", "BUY", 1, 100.0, "O")]
+    with caplog.at_level("WARNING"):
+        out = coalesce_fills(legs)
+    assert len(out) == 1 and out[0].quantity == 2
+    assert "no order_id" in caplog.text
+    # cross-minute WITHOUT order_id -> NOT merged (heuristic can't span time)
+    legs2 = [_leg("T1", "2026-05-20", "09:31:15", "BUY", 1, 100.0, "O"),
+             _leg("T2", "2026-05-20", "09:33:40", "BUY", 1, 100.0, "O")]
+    assert len(coalesce_fills(legs2)) == 2
+
+
+def test_coalesce_C6_open_order_split_across_two_close_orders():
+    legs = [
+        _leg("O1", "2026-05-20", "10:00:00", "BUY", 1, 100.0, "O", order_id="OA"),
+        _leg("O2", "2026-05-20", "10:00:00", "BUY", 2, 100.0, "O", order_id="OA"),  # 1 order, qty3
+        _leg("C1", "2026-05-20", "11:00:00", "SELL", -2, 110.0, "C", order_id="OB"),
+        _leg("C2", "2026-05-20", "12:00:00", "SELL", -1, 120.0, "C", order_id="OC"),
+    ]
+    rts, _ = pair_round_trips(coalesce_fills(legs))
+    assert len(rts) == 2                      # 1 entry order, 2 separate exit orders -> 2 RTs
+    assert sorted(rt.quantity for rt in rts) == [1, 2]
+    assert all(rt.open_trade_id == "O1" for rt in rts)   # representative entry id, stable
+
+
+def test_coalesce_C7_null_commission_fill_still_weights_price():
+    legs = [_leg("T1", "2026-05-20", "09:31:15", "BUY", 1, 100.0, "O", order_id="O1", comm=-0.62),
+            _leg("T2", "2026-05-20", "09:31:15", "BUY", 3, 200.0, "O", order_id="O1", comm=None)]
+    m = coalesce_fills(legs)[0]
+    assert m.ib_commission == pytest.approx(-0.62)             # sum of non-None
+    assert m.trade_price == pytest.approx((1*100.0 + 3*200.0) / 4)   # NULL-comm fill still weights price
+    # all-None commission -> None
+    legs2 = [_leg("A", "2026-05-20", "09:31:15", "BUY", 1, 100.0, "O", order_id="O2", comm=None),
+             _leg("B", "2026-05-20", "09:31:15", "BUY", 1, 100.0, "O", order_id="O2", comm=None)]
+    assert coalesce_fills(legs2)[0].ib_commission is None
+
+
+def test_coalesce_C8_representative_id_order_independent():
+    a = _leg("T9", "2026-05-20", "09:31:15", "BUY", 1, 100.0, "O", order_id="O1")
+    b = _leg("T3", "2026-05-20", "09:31:15", "BUY", 1, 100.0, "O", order_id="O1")
+    assert coalesce_fills([a, b])[0].trade_id == "T3"
+    assert coalesce_fills([b, a])[0].trade_id == "T3"   # same regardless of input order
+
+
+def test_coalesce_refuse_mixed_group(caplog):
+    # same order_id but mixed open/close (defensive: should not merge)
+    legs = [_leg("T1", "2026-05-20", "10:00:00", "BUY", 1, 100.0, "O", order_id="OX"),
+            _leg("T2", "2026-05-20", "10:00:00", "SELL", -1, 100.0, "C", order_id="OX")]
+    with caplog.at_level("WARNING"):
+        out = coalesce_fills(legs)
+    assert len(out) == 2                       # left un-merged
+    assert "mixed" in caplog.text
+
+
+def test_coalesce_refuse_cross_trade_date():
+    # same order_id spanning two trade_dates (GTC rollover) -> not merged
+    legs = [_leg("T1", "2026-05-20", "23:59:00", "BUY", 1, 100.0, "O", order_id="OY"),
+            _leg("T2", "2026-05-21", "00:01:00", "BUY", 1, 100.0, "O", order_id="OY")]
+    assert len(coalesce_fills(legs)) == 2
+
+
+def test_coalesce_C15_roundtrip_uses_weighted_open_price():
+    legs = [
+        _leg("O1", "2026-05-20", "10:00:00", "BUY", 1, 100.0, "O", order_id="OA", comm=-0.5),
+        _leg("O2", "2026-05-20", "10:00:00", "BUY", 1, 102.0, "O", order_id="OA", comm=-0.5),
+        _leg("C1", "2026-05-20", "11:00:00", "SELL", -2, 110.0, "C", order_id="OB", comm=-1.0),
+    ]
+    rts, _ = pair_round_trips(coalesce_fills(legs))
+    assert len(rts) == 1
+    rt = rts[0]
+    assert rt.quantity == 2
+    assert rt.open_price == pytest.approx(101.0)        # weighted avg entry
+    assert rt.pnl_pts == pytest.approx(110.0 - 101.0)   # uses weighted open
+    # pnl_usd = 9 pts * mult2 * qty2 + (open+close commission summed)
+    assert rt.pnl_usd == pytest.approx(9.0 * 2 * 2 + (-1.0 + -1.0))
+
+
+def test_coalesce_qty_zero_group_no_divide():
+    legs = [_leg("T1", "2026-05-20", "10:00:00", "BUY", 0, 100.0, "O", order_id="OZ"),
+            _leg("T2", "2026-05-20", "10:00:00", "BUY", 0, 100.0, "O", order_id="OZ")]
+    out = coalesce_fills(legs)   # must not ZeroDivisionError
+    assert len(out) == 1
