@@ -32,7 +32,7 @@ import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import annotations, exporter, sqlite_store
+from . import annotations, exporter, r_multiple, sqlite_store
 from .constants import (
     ANNOTATIONS_PATH,
     DEFAULT_EXPORT_LOOKBACK_DAYS,
@@ -977,6 +977,10 @@ _PIVOT_DIMS = ("Setup", "Class", "Underlying", "Direction", "Result", "Session",
 
 def _record(rt: RoundTrip, tag_code: str, tag_name: str,
             ann: annotations.Annotation | None) -> dict:
+    # FR-PIVOT-10: derive R from the entry's optional planned_stop. None stop /
+    # invalid stop -> R None (the no-R subset); StopStatus carries the reason so
+    # the JS can tally invalid stops into a warning.
+    rinfo = r_multiple.r_for_round_trip(rt, ann.planned_stop_value if ann else None)
     return {
         "open_trade_id": rt.open_trade_id,
         "Setup": tag_name,
@@ -1005,6 +1009,13 @@ def _record(rt: RoundTrip, tag_code: str, tag_name: str,
         "CloseTime": rt.close_time,
         "OpenPx": rt.open_price,
         "ClosePx": rt.close_price,
+        # FR-PIVOT-10 R-multiple. R kept at 4dp (kills JSON float-noise, keeps
+        # aggregate precision); display rounds to 2dp. RealizedRisk at cents.
+        "R": round(rinfo.r, 4) if rinfo.r is not None else None,
+        "RealizedRisk": round(rinfo.realized_risk, 2) if rinfo.realized_risk is not None else None,
+        "HasR": rinfo.has_r,
+        "StopStatus": rinfo.status,
+        "PlannedStop": ann.planned_stop_value if ann else None,
     }
 
 
@@ -1192,6 +1203,53 @@ def _scoring_rows(rts: list[RoundTrip], tags: list[str], cfg: annotations.TagCon
         })
     rows.sort(key=lambda r: r["net"], reverse=True)
     return rows
+
+
+# --- R-multiple aggregates (FR-PIVOT-10) — source of truth (SPEC D4) ---
+# Separate from _kpis/_scoring_rows so their signatures + tests stay untouched.
+# Operate on the R-bearing `records` (which carry R/HasR/StopStatus from _record).
+# JS computeRKpis/computeRScoring mirror these; keep the two in sync.
+
+def _r_kpis(records: list[dict]) -> dict:
+    """R aggregates over the closed subset that has a valid R (with-stop).
+
+    coverage = r_n / n_closed. expectancy_r = mean per-round-trip R (mirrors the
+    dollar expectancy = mean per-RT pnl). blown = R below the −1R floor.
+    invalid_stops = entries whose stop was entered but unusable (zero / wrong-side)
+    — surfaced as a data-hygiene warning, distinct from 'no stop entered'."""
+    closed = [r for r in records if r["PnL_USD"] is not None]
+    with_r = [r for r in closed if r["R"] is not None]
+    wins = [r["R"] for r in with_r if r["R"] > 0]
+    losses = [r["R"] for r in with_r if r["R"] <= 0]
+    rs = [r["R"] for r in with_r]
+    invalid = sum(1 for r in records if r.get("StopStatus") in ("zero", "wrong_side"))
+    return {
+        "r_n": len(with_r), "n_closed": len(closed),
+        "expectancy_r": (sum(rs) / len(rs)) if rs else None,
+        "avg_win_r": (sum(wins) / len(wins)) if wins else None,
+        "avg_loss_r": (sum(losses) / len(losses)) if losses else None,
+        "blown": sum(1 for v in rs if v < -1.0),
+        "invalid_stops": invalid,
+    }
+
+
+def _r_scoring(records: list[dict]) -> dict[str, dict]:
+    """Per-setup R: {SetupCode: {r_n, n, expectancy_r}}. n = closed count in the
+    group (the coverage denominator); expectancy_r over the with-R subset."""
+    buckets: dict[str, dict] = {}
+    for r in records:
+        if r["PnL_USD"] is None:
+            continue
+        b = buckets.setdefault(r["SetupCode"], {"r_n": 0, "n": 0, "rsum": 0.0})
+        b["n"] += 1
+        if r["R"] is not None:
+            b["r_n"] += 1
+            b["rsum"] += r["R"]
+    return {
+        code: {"r_n": b["r_n"], "n": b["n"],
+               "expectancy_r": (b["rsum"] / b["r_n"]) if b["r_n"] else None}
+        for code, b in buckets.items()
+    }
 
 
 # --- presentation helpers ---
