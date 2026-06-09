@@ -58,6 +58,10 @@ _PAGE_CSS = """
  body{font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;
    max-width:1800px;margin:24px auto;padding:0 24px;color:#222}
  h1{margin:0 0 2px} h2{margin:30px 0 8px;font-size:16px}
+ /* FR-PIVOT-10: R section heading goes quiet (not hidden) when there's no R to
+    plot — keeps its own identity + top spacing so the hint doesn't read as an
+    equity-curve caption, but recedes (gray, lighter) so it never nags. */
+ h2.r-quiet{color:#aaa;font-weight:500;font-size:14px}
  .meta{color:#888;font-size:12px;margin-bottom:16px}
 
  /* KPI cards (Tier-1 #4) — three visual tiers: headline (Net P&L, big),
@@ -727,12 +731,12 @@ _APP_JS = r"""
     // heading so it doesn't reserve screen) that says how to unlock R. Muted,
     // near-background, no push, platform-neutral (points at the file, not a script).
     if(pts.length<2){
-      if(head) head.style.display='none';
-      el.innerHTML="<p class='muted' style='margin:6px 0'>No planned stops in view — R-multiple needs your initial stop. "+
+      if(head) head.className='r-quiet';   // dim (not hide): keeps section identity + spacing
+      el.innerHTML="<p class='muted' style='margin:4px 0 0'>No planned stops in view — R-multiple needs your initial stop. "+
         "Add a planned_stop to trades in annotations.csv to see R (profit ÷ planned risk).</p>";
       renderRDrill(null); return;
     }
-    if(head) head.style.display='';
+    if(head) head.className='';
     var cov="<div class='rcov'"+rCovTitle(rk)+">R coverage: <b>"+rk.r_n+" / "+rk.n_closed+"</b> closed round-trips have a planned stop"+
       " · expectancy "+rChip(rk.expectancy_r)+
       (rk.blown? " · <a href='#' id='rBlown' class='neg'>"+rk.blown+" blew through −1R</a>":"")+
