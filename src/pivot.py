@@ -248,6 +248,9 @@ _APP_JS = r"""
   // FR-PIVOT-10 R formatting — "+1.80R" / "−1.10R" (en-dash neg; neutral colors).
   function signedR(v){ if(v==null) return '—'; return (v>=0?'+':'−')+Math.abs(v).toFixed(2)+'R'; }
   function rChip(v){ return v==null ? '' : "<span class='rchip "+cls(v)+"'>"+signedR(v)+"</span>"; }
+  // Non-pushy "where to add" hint — lives only in a hover title (zero footprint).
+  function rCovTitle(rk){ var miss=rk.n_closed-rk.r_n;
+    return miss>0 ? " title='"+miss+" trade(s) have no planned stop — add one in annotations.csv to include them.'" : ""; }
 
   function uniq(key){ var s={}; DATA.forEach(function(r){ s[r[key]]=1; }); return Object.keys(s).sort(); }
   function fillSel(id,label,key){ var el=$sel(id); el.innerHTML='<option value="">all '+label+'</option>'+
@@ -560,9 +563,9 @@ _APP_JS = r"""
     // carries a planned stop; an invalid-stop count nudges the user to fix data.
     var cov = '';
     if(hasR || (rk && rk.invalid_stops>0)){
-      cov = "<div class='rcov'>R coverage: <b>" + rk.r_n + " / " + rk.n_closed +
+      cov = "<div class='rcov'" + rCovTitle(rk) + ">R coverage: <b>" + rk.r_n + " / " + rk.n_closed +
         "</b> closed round-trips have a planned stop" +
-        (rk.invalid_stops>0 ? " · <span class='neg'>" + rk.invalid_stops + "</span> invalid stop(s) ignored" : "") +
+        (rk.invalid_stops>0 ? " · " + rk.invalid_stops + " invalid stop(s) ignored" : "") +
         "</div>";
     }
     $sel('kpiHeadline').innerHTML =
@@ -718,15 +721,22 @@ _APP_JS = r"""
 
   function renderRHist(rk){
     var el=$sel('rHist'); if(!el) return;
+    var head=$sel('rHistHead');
     var pts=(rk.withR||[]).slice();
-    var cov="<div class='rcov'>R coverage: <b>"+rk.r_n+" / "+rk.n_closed+"</b> closed round-trips have a planned stop"+
-      (rk.r_n? " · expectancy "+rChip(rk.expectancy_r)+
-        (rk.blown? " · <a href='#' id='rBlown' class='neg'>"+rk.blown+" blew through −1R</a>":""):"")+
-      (rk.invalid_stops? " · <span class='neg'>"+rk.invalid_stops+"</span> invalid stop(s) ignored":"")+"</div>";
+    // Nothing to plot: collapse the section to one quiet line (hide the big
+    // heading so it doesn't reserve screen) that says how to unlock R. Muted,
+    // near-background, no push, platform-neutral (points at the file, not a script).
     if(pts.length<2){
-      el.innerHTML="<p class='muted'>Enter a planned stop on some trades to see their R distribution.</p>"+cov;
+      if(head) head.style.display='none';
+      el.innerHTML="<p class='muted' style='margin:6px 0'>No planned stops in view — R-multiple needs your initial stop. "+
+        "Add a planned_stop to trades in annotations.csv to see R (profit ÷ planned risk).</p>";
       renderRDrill(null); return;
     }
+    if(head) head.style.display='';
+    var cov="<div class='rcov'"+rCovTitle(rk)+">R coverage: <b>"+rk.r_n+" / "+rk.n_closed+"</b> closed round-trips have a planned stop"+
+      " · expectancy "+rChip(rk.expectancy_r)+
+      (rk.blown? " · <a href='#' id='rBlown' class='neg'>"+rk.blown+" blew through −1R</a>":"")+
+      (rk.invalid_stops? " · "+rk.invalid_stops+" invalid stop(s) ignored":"")+"</div>";
     var w=1180,h=270,padx=46,padTop=18,padBot=42,iw=w-2*padx,ih=h-padTop-padBot;
     function X(r){ var v=Math.max(R_LO+1e-6,Math.min(R_HI-1e-6,r)); return padx+iw*(v-R_LO)/(R_HI-R_LO); }
     // faint histogram backdrop (0.5R bins)
@@ -1561,7 +1571,7 @@ def build_html(rts: list[RoundTrip], stats: dict,
 <h2>Equity curve — cumulative net P&amp;L (by close order)</h2>
 <div id="equityCurve"></div>
 
-<h2>★ R-multiple distribution — decision quality vs the −1R floor</h2>
+<h2 id="rHistHead">★ R-multiple distribution — decision quality vs the −1R floor</h2>
 <div id="rHist"></div>
 <div id="rDrill"></div>
 
