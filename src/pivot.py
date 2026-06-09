@@ -101,6 +101,18 @@ _PAGE_CSS = """
  .brand .meta{font-size:11px;color:#888;margin-top:3px}
 
  .pos{color:#2b6cb0} .neg{color:#c2792e}
+ /* FR-PIVOT-10 R-multiple — V3 colored chip under the dollar value */
+ .rchip{display:inline-block;font-size:13px;font-weight:600;padding:1px 8px;border-radius:10px;margin-top:3px;line-height:1.5}
+ .rchip.pos{background:#eaf1f8;color:#2b6cb0} .rchip.neg{background:#f7eee2;color:#9c6420}
+ .rcov{color:#888;font-size:11px;margin-top:6px}
+ /* shared floating tooltip (R chart + equity hover) */
+ #rtip{position:fixed;z-index:50;pointer-events:none;display:none;background:#fff;
+   border:1px solid #d8dde2;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.12);
+   padding:6px 9px;font-size:12px;line-height:1.5;max-width:280px}
+ #rtip .t-sym{font-weight:600}
+ #rDrill{margin:6px 0 4px;font-size:12px}
+ #rDrill table.grid{font-size:12px}
+ #rHist svg .dot{cursor:pointer}
  table.grid{border-collapse:collapse;margin:8px 0;font-size:13px}
  table.grid th,table.grid td{border:1px solid #e5e5e5;padding:4px 10px;text-align:right;white-space:nowrap}
  table.grid th:first-child,table.grid td:first-child{text-align:left}
@@ -233,6 +245,9 @@ _APP_JS = r"""
   function cls(v){ return v>=0?'pos':'neg'; }
   function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
   function pnl(r){ return r.PnL_USD==null?0:r.PnL_USD; }
+  // FR-PIVOT-10 R formatting — "+1.80R" / "−1.10R" (en-dash neg; neutral colors).
+  function signedR(v){ if(v==null) return '—'; return (v>=0?'+':'−')+Math.abs(v).toFixed(2)+'R'; }
+  function rChip(v){ return v==null ? '' : "<span class='rchip "+cls(v)+"'>"+signedR(v)+"</span>"; }
 
   function uniq(key){ var s={}; DATA.forEach(function(r){ s[r[key]]=1; }); return Object.keys(s).sort(); }
   function fillSel(id,label,key){ var el=$sel(id); el.innerHTML='<option value="">all '+label+'</option>'+
@@ -392,15 +407,33 @@ _APP_JS = r"""
     };
   }
 
+  // FR-PIVOT-10 — JS mirror of Python _r_kpis (source of truth in src/pivot.py).
+  // Aggregates R over the closed subset that has a valid R (a planned stop).
+  function computeRKpis(records){
+    var closed = records.filter(function(r){return r.PnL_USD!=null;});
+    var withR = closed.filter(function(r){return r.R!=null;});
+    var wins = withR.filter(function(r){return r.R>0;});
+    var losses = withR.filter(function(r){return r.R<=0;});
+    function mean(a){ return a.length ? a.reduce(function(s,r){return s+r.R;},0)/a.length : null; }
+    return {
+      r_n: withR.length, n_closed: closed.length, withR: withR,
+      expectancy_r: mean(withR), avg_win_r: mean(wins), avg_loss_r: mean(losses),
+      blown: withR.filter(function(r){return r.R<-1.0;}).length,
+      invalid_stops: records.filter(function(r){return r.StopStatus==='zero'||r.StopStatus==='wrong_side';}).length
+    };
+  }
+
   function computeScoring(records){
     var b = {};
     records.forEach(function(r){
       if(r.PnL_USD==null) return;
       var k = r.SetupCode;
       var x = b[k] || (b[k] = { code:k, name:r.Setup, n:0, net:0, gp:0, gl:0,
-                                nw:0, nl:0, hw:0, hwn:0, hl:0, hln:0, intraday:0 });
+                                nw:0, nl:0, hw:0, hwn:0, hl:0, hln:0, intraday:0,
+                                rsum:0, rn:0 });
       x.n++; x.net += r.PnL_USD;
       if(r.OpenDate === r.CloseDate) x.intraday++;
+      if(r.R!=null){ x.rsum += r.R; x.rn++; }   // FR-PIVOT-10 per-setup R subset
       if(r.PnL_USD>0){ x.nw++; x.gp += r.PnL_USD; x.hw += r.Hold_min; x.hwn++; }
       else { x.nl++; x.gl += r.PnL_USD; x.hl += r.Hold_min; x.hln++; }
     });
@@ -410,6 +443,7 @@ _APP_JS = r"""
       win_rate: x.n ? x.nw/x.n*100 : 0,
       pf: x.gl<0 ? x.gp/Math.abs(x.gl) : null,
       expectancy: x.n ? x.net/x.n : 0,
+      expectancy_r: x.rn ? x.rsum/x.rn : null, r_n: x.rn,
       avg_win: x.nw ? x.gp/x.nw : 0,
       avg_loss: x.nl ? x.gl/x.nl : 0,
       hold_win: x.hwn ? x.hw/x.hwn : 0,
@@ -462,8 +496,9 @@ _APP_JS = r"""
   // KPI in 3 visual tiers (Tier-1 #4): the headline number stands out, the
   // 5 next-level "edge" metrics share a row, accounting/streaks recede into
   // small cards. Avoids the phase-1 "everything looks equally important" trap.
-  function renderKpiHeadline(k){
+  function renderKpiHeadline(k, rk){
     var pf = k.profit_factor==null ? '∞' : k.profit_factor.toFixed(2);
+    var hasR = rk && rk.r_n > 0;   // FR-PIVOT-10: R surface only when coverage>0
     var dd = k.dd;
     var ddPct = dd.pct==null ? '' : ', ' + dd.pct.toFixed(1) + '%';
     var ddTxt = "<span class='neg'>" + signed(-dd.amount) + "</span><small>" + ddPct + ", " + dd.days + "d</small>";
@@ -473,11 +508,13 @@ _APP_JS = r"""
     var rr = (k.avg_loss < 0) ? (Math.abs(k.avg_win) / Math.abs(k.avg_loss)) : null;
     var rrTxt = (k.avg_win <= 0 && k.avg_loss === 0) ? '—' : (rr == null ? '∞' : rr.toFixed(2));
 
-    function card(label, value){
-      return "<div class='card'><div class='k'>" + label + "</div><div class='v'>" + value + "</div></div>";
+    // c[2] (optional) = R value -> a V3 colored chip under the dollar value.
+    function card(label, value, rVal){
+      var chip = (rVal==null) ? '' : rChip(rVal);
+      return "<div class='card'><div class='k'>" + label + "</div><div class='v'>" + value + "</div>" + chip + "</div>";
     }
     function cardSection(cls_, items){
-      return "<div class='" + cls_ + "'>" + items.map(function(c){return card(c[0],c[1]);}).join('') + "</div>";
+      return "<div class='" + cls_ + "'>" + items.map(function(c){return card(c[0],c[1],c[2]);}).join('') + "</div>";
     }
 
     // Headline: just the dollars. Big.
@@ -490,7 +527,8 @@ _APP_JS = r"""
       ['Win rate', k.win_rate.toFixed(0) + "% <small>(" + k.n_wins + "/" + k.n_closed + ")</small>"],
       ['Profit factor', pf],
       ['Win/Loss ratio', rrTxt + " <small>:1</small>"],
-      ['Expectancy', "<span class='" + cls(k.expectancy) + "'>" + signed(k.expectancy) + "</span>"],
+      ['Expectancy', "<span class='" + cls(k.expectancy) + "'>" + signed(k.expectancy) + "</span>",
+        hasR ? rk.expectancy_r : null],
       ['Max drawdown', ddTxt]
     ]);
 
@@ -510,16 +548,27 @@ _APP_JS = r"""
       ['Round-trips', String(k.n)],
       ['Gross P&L', "<span class='" + cls(k.gross) + "'>" + signed(k.gross) + "</span>"],
       ['Commissions', "<span class='neg'>" + signed(k.commission) + "</span>"],
-      ['Avg win', "<span class='pos'>" + signed(k.avg_win) + "</span>"],
-      ['Avg loss', "<span class='neg'>" + signed(k.avg_loss) + "</span>"],
+      ['Avg win', "<span class='pos'>" + signed(k.avg_win) + "</span>",
+        hasR ? rk.avg_win_r : null],
+      ['Avg loss', "<span class='neg'>" + signed(k.avg_loss) + "</span>",
+        hasR ? rk.avg_loss_r : null],
       ['Max win streak', streakCell(k.max_win_streak, ltWin, '▲', 'pos')],
       ['Max loss streak', streakCell(k.max_loss_streak, ltLoss, '▼', 'neg')]
     ]);
 
+    // FR-PIVOT-10 coverage badge — always honest about how much of the book
+    // carries a planned stop; an invalid-stop count nudges the user to fix data.
+    var cov = '';
+    if(hasR || (rk && rk.invalid_stops>0)){
+      cov = "<div class='rcov'>R coverage: <b>" + rk.r_n + " / " + rk.n_closed +
+        "</b> closed round-trips have a planned stop" +
+        (rk.invalid_stops>0 ? " · <span class='neg'>" + rk.invalid_stops + "</span> invalid stop(s) ignored" : "") +
+        "</div>";
+    }
     $sel('kpiHeadline').innerHTML =
       "<div class='kpi-grid'>" + headline +
       "<div class='kpi-right'>" + primary + secondary + "</div>" +
-      "</div>";
+      "</div>" + cov;
   }
 
   function renderEquityCurve(k){
@@ -555,6 +604,10 @@ _APP_JS = r"""
       xLabels += "<line x1='"+xPos.toFixed(1)+"' y1='"+(h-pady).toFixed(1)+"' x2='"+xPos.toFixed(1)+"' y2='"+(h-pady+4).toFixed(1)+"' stroke='#bbb'/>"+
         "<text x='"+xPos.toFixed(1)+"' y='"+(h-pady+15).toFixed(1)+"' text-anchor='middle' font-size='10' fill='#888'>"+esc(mmdd)+"</text>";
     }
+    // FR-PIVOT-10: running R alongside running $ for the hover tooltip (no 2nd
+    // curve — proposal forbids the redundant R equity line; we surface it on hover).
+    var cumR=[], rr=0, anyR=false;
+    closed.forEach(function(r){ if(r.R!=null){ rr+=r.R; anyR=true; } cumR.push(anyR?rr:null); });
     $sel('equityCurve').innerHTML =
       "<svg viewBox='0 0 "+w+" "+h+"' width='100%' style='max-width:"+w+"px'>"+
       "<rect x='0' y='0' width='"+w+"' height='"+h+"' fill='#fff' stroke='#eee'/>"+band+
@@ -565,33 +618,160 @@ _APP_JS = r"""
       xLabels+
       "<polyline points='"+poly+"' fill='none' stroke='"+color+"' stroke-width='2'/>"+
       "<text x='"+(w-padx)+"' y='"+(Y(final)-6).toFixed(1)+"' text-anchor='end' font-size='11' fill='"+color+"' font-weight='bold'>"+signed(final)+"</text>"+
+      "<g id='eqHover'></g>"+
+      "<rect id='eqOverlay' x='"+padx+"' y='"+pady+"' width='"+iw+"' height='"+ih+"' fill='transparent' style='cursor:crosshair'/>"+
       "</svg>";
+    // hover crosshair + tooltip; click drills the trade at that point into #rDrill
+    var svg=$sel('equityCurve').querySelector('svg'), ov=$sel('eqOverlay'), hov=$sel('eqHover');
+    function idxFromEvent(e){
+      var rect=svg.getBoundingClientRect();
+      var sx=(e.clientX-rect.left)/rect.width*w;     // client px -> viewBox units
+      var i = n>1 ? Math.round((sx-padx)/(iw/(n-1))) : 0;
+      return Math.max(0, Math.min(n-1, i));
+    }
+    if(ov){
+      ov.addEventListener('mousemove', function(e){
+        var i=idxFromEvent(e), cx=X(i), cy=Y(cum[i]), t=closed[i];
+        hov.innerHTML="<line x1='"+cx.toFixed(1)+"' y1='"+pady+"' x2='"+cx.toFixed(1)+"' y2='"+(pady+ih)+"' stroke='#bbb'/>"+
+          "<circle cx='"+cx.toFixed(1)+"' cy='"+cy.toFixed(1)+"' r='4' fill='"+(cum[i]>=0?POS:NEG)+"'/>";
+        showTip(e, "<div class='t-sym'>#"+(i+1)+"/"+n+" · "+esc(t.Underlying)+" "+esc(t.Direction)+"</div>"+
+          "<div>"+esc(t.CloseDate)+" · P&L "+fmt(pnl(t))+(t.R!=null?" ("+signedR(t.R)+")":"")+"</div>"+
+          "<div class='muted'>cumulative "+signed(cum[i])+(cumR[i]!=null?" · "+signedR(cumR[i]):"")+"</div>");
+      });
+      ov.addEventListener('mouseleave', function(){ hov.innerHTML=''; hideTip(); });
+      ov.addEventListener('click', function(e){ var t=closed[idxFromEvent(e)];
+        hideTip(); renderRDrill([t], esc(t.CloseDate)+' '+esc(t.Underlying)); });
+    }
   }
 
-  function renderScoringTable(rows){
+  function renderScoringTable(rows, hasR){
     if(!rows.length){ $sel('scoringTable').innerHTML = "<p class='muted'>No closed round-trips.</p>"; return; }
     var body = rows.map(function(r){
       var pf = r.pf==null ? '∞' : r.pf.toFixed(2);
       var flag = (r.hold_loss > r.hold_win && r.hold_win > 0) ? ' ⚠' : '';
+      // FR-PIVOT-10 Exp R cell — per-setup coverage badge when partial.
+      var rcell = !hasR ? '' : ("<td class='"+(r.expectancy_r==null?'muted':cls(r.expectancy_r))+"'>"+
+        (r.expectancy_r==null?'—':signedR(r.expectancy_r))+
+        (r.expectancy_r!=null&&r.r_n<r.n?" <small>("+r.r_n+"/"+r.n+")</small>":"")+"</td>");
       return "<tr><td>"+esc(r.name)+"</td><td>"+r.n+"</td>"+
         "<td class='"+cls(r.net)+"'>"+signed(r.net)+"</td>"+
         "<td>"+r.win_rate.toFixed(0)+"%</td><td>"+pf+"</td>"+
-        "<td class='"+cls(r.expectancy)+"'>"+signed(r.expectancy)+"</td>"+
+        "<td class='"+cls(r.expectancy)+"'>"+signed(r.expectancy)+"</td>"+ rcell +
         "<td class='pos'>"+signed(r.avg_win)+"</td>"+
         "<td class='neg'>"+signed(r.avg_loss)+"</td>"+
         "<td>"+r.hold_win.toFixed(0)+"m</td>"+
         "<td>"+r.hold_loss.toFixed(0)+"m"+flag+"</td>"+
         "<td>"+r.intraday_pct.toFixed(0)+"%</td></tr>";
     }).join('');
+    var rhead = hasR ? "<th title='avg R-multiple (subset with a planned stop)'>Exp R</th>" : "";
     $sel('scoringTable').innerHTML =
       "<table class='grid'><thead><tr>"+
       "<th>Setup</th><th>#</th><th>Net P&amp;L</th><th>Win%</th><th>PF</th>"+
-      "<th>Expectancy</th><th>Avg win</th><th>Avg loss</th>"+
+      "<th>Expectancy</th>"+ rhead +"<th>Avg win</th><th>Avg loss</th>"+
       "<th title='avg hold of winning round-trips'>Hold (win)</th>"+
       "<th title='avg hold of losing round-trips'>Hold (loss)</th>"+
       "<th title='share opened+closed same day'>Intraday%</th>"+
       "</tr></thead><tbody>"+body+"</tbody></table>"+
       "<div class='note'>⚠ = losers held longer than winners (possible \"cut winners, ride losers\").</div>";
+  }
+
+  // === FR-PIVOT-10 R distribution — beeswarm dots over a faint histogram ===
+  // The one focus chart (proposal §3): each dot = one round-trip, placed on the
+  // R axis; a faint binned histogram behind gives the density backdrop. Dashed
+  // line at −1R = the clean-stop floor; dots left of it (blown stops) are
+  // outlined. Mean line marks the R expectancy. Hover = trade identity; click a
+  // dot (or the "blew through −1R" link) = drill the cohort into the panel below.
+  // Deliberately NO cumulative line, NO prescriptive verdict (small-sample honesty).
+  var R_LO=-2.5, R_HI=5.0, R_BW=0.5, RHIST_PTS=[];
+
+  function _usd0(v){ return '$'+Math.round(Math.abs(v)).toLocaleString(); }
+  function showTip(e, html){
+    var t=$sel('rtip'); if(!t) return;
+    t.innerHTML=html; t.style.display='block';
+    var x=e.clientX+14, y=e.clientY+14;
+    t.style.left=Math.min(x, window.innerWidth-290)+'px';
+    t.style.top=Math.min(y, window.innerHeight-90)+'px';
+  }
+  function hideTip(){ var t=$sel('rtip'); if(t) t.style.display='none'; }
+  function tipForTrade(t){
+    return "<div class='t-sym'>"+signedR(t.R)+" · "+esc(t.Underlying)+" "+esc(t.Direction)+"</div>"+
+      "<div>"+esc(t.CloseDate)+" · P&L "+fmt(pnl(t))+(t.RealizedRisk!=null?" · risk "+_usd0(t.RealizedRisk):"")+"</div>"+
+      "<div class='muted'>"+esc(t.Setup)+(t.R<-1.0?" · blown stop ⚠":"")+"</div>";
+  }
+  function renderRDrill(trades, label){
+    var el=$sel('rDrill'); if(!el) return;
+    if(!trades || !trades.length){ el.innerHTML=''; return; }
+    var beyond = trades.reduce(function(s,t){
+      return s + ((t.R<-1.0 && t.RealizedRisk!=null) ? ((-pnl(t))-t.RealizedRisk) : 0); }, 0);
+    var head = "<div class='rcov'><b>"+esc(label)+"</b> ("+trades.length+")"+
+      (beyond>0 ? " · <span class='neg'>"+signed(-beyond)+"</span> lost beyond plan" : "")+
+      " · <a href='#' id='rDrillClose'>clear ✕</a></div>";
+    var body = trades.slice().sort(function(a,b){return a.R-b.R;}).map(function(t){
+      return "<tr><td>"+esc(t.CloseDate)+"</td><td>"+esc(t.Setup)+"</td><td>"+esc(t.Underlying)+
+        "</td><td>"+esc(t.Direction)+"</td><td class='"+cls(pnl(t))+"'>"+fmt(pnl(t))+
+        "</td><td class='"+(t.R>=0?'pos':'neg')+"'>"+signedR(t.R)+(t.R<-1.0?' ⚠':'')+"</td></tr>";
+    }).join('');
+    el.innerHTML = head + "<table class='grid'><thead><tr><th>Close</th><th>Setup</th>"+
+      "<th>Sym</th><th>Dir</th><th>P&amp;L</th><th>R</th></tr></thead><tbody>"+body+"</tbody></table>";
+    var c=$sel('rDrillClose'); if(c) c.onclick=function(e){ e.preventDefault(); el.innerHTML=''; };
+  }
+
+  function renderRHist(rk){
+    var el=$sel('rHist'); if(!el) return;
+    var pts=(rk.withR||[]).slice();
+    var cov="<div class='rcov'>R coverage: <b>"+rk.r_n+" / "+rk.n_closed+"</b> closed round-trips have a planned stop"+
+      (rk.r_n? " · expectancy "+rChip(rk.expectancy_r)+
+        (rk.blown? " · <a href='#' id='rBlown' class='neg'>"+rk.blown+" blew through −1R</a>":""):"")+
+      (rk.invalid_stops? " · <span class='neg'>"+rk.invalid_stops+"</span> invalid stop(s) ignored":"")+"</div>";
+    if(pts.length<2){
+      el.innerHTML="<p class='muted'>Enter a planned stop on some trades to see their R distribution.</p>"+cov;
+      renderRDrill(null); return;
+    }
+    var w=1180,h=270,padx=46,padTop=18,padBot=42,iw=w-2*padx,ih=h-padTop-padBot;
+    function X(r){ var v=Math.max(R_LO+1e-6,Math.min(R_HI-1e-6,r)); return padx+iw*(v-R_LO)/(R_HI-R_LO); }
+    // faint histogram backdrop (0.5R bins)
+    var nb=Math.round((R_HI-R_LO)/R_BW), bins=[]; for(var i=0;i<nb;i++) bins.push(0);
+    pts.forEach(function(t){ var v=Math.max(R_LO+1e-6,Math.min(R_HI-1e-6,t.R)); bins[Math.floor((v-R_LO)/R_BW)]++; });
+    var maxB=Math.max.apply(null,bins)||1, binPx=iw/nb;
+    var hist=bins.map(function(c,i){ if(!c) return '';
+      var bh=ih*c/maxB, x=padx+i*binPx, y=padTop+ih-bh, isWin=(R_LO+i*R_BW+R_BW/2)>0;
+      return "<rect x='"+x.toFixed(1)+"' y='"+y.toFixed(1)+"' width='"+(binPx-1).toFixed(1)+
+        "' height='"+bh.toFixed(1)+"' fill='"+(isWin?POS:NEG)+"' opacity='0.10'/>"; }).join('');
+    // beeswarm dots — stack within fine columns from the baseline up
+    var dotR=5, colW=2*dotR, baseline=padTop+ih-dotR-1, colN={};
+    pts.sort(function(a,b){ return a.R-b.R; });   // stable stacking; index = data-i
+    var dots=pts.map(function(t,idx){
+      var col=Math.round(X(t.R)/colW), n=(colN[col]=(colN[col]||0)+1);
+      var cy=baseline-(n-1)*(colW-1), blown=t.R<-1.0;
+      return "<circle class='dot' data-i='"+idx+"' cx='"+(col*colW).toFixed(1)+"' cy='"+cy.toFixed(1)+
+        "' r='"+dotR+"' fill='"+(t.R>0?POS:NEG)+"' opacity='"+(blown?0.95:0.7)+"'"+
+        (blown?" stroke='"+NEG+"' stroke-width='1.3'":"")+"/>"; }).join('');
+    var zeroX=X(0), floorX=X(-1);
+    var meanX = rk.expectancy_r!=null ? X(rk.expectancy_r) : null;
+    var ticks='';
+    for(var t2=-2;t2<=5;t2++){ var xp=X(t2);
+      ticks+="<line x1='"+xp.toFixed(1)+"' y1='"+(padTop+ih)+"' x2='"+xp.toFixed(1)+"' y2='"+(padTop+ih+4)+"' stroke='#bbb'/>"+
+        "<text x='"+xp.toFixed(1)+"' y='"+(padTop+ih+16)+"' text-anchor='middle' font-size='10' fill='#888'>"+t2+"R</text>"; }
+    var meanLine = meanX==null ? '' :
+      "<line x1='"+meanX.toFixed(1)+"' y1='"+padTop+"' x2='"+meanX.toFixed(1)+"' y2='"+(padTop+ih)+"' stroke='#2b6cb0' stroke-width='1' opacity='.5'/>"+
+      "<text x='"+(meanX+3).toFixed(1)+"' y='"+(padTop+ih-4)+"' font-size='10' fill='#2b6cb0'>mean "+signedR(rk.expectancy_r)+"</text>";
+    var svg="<svg viewBox='0 0 "+w+" "+h+"' width='100%' style='max-width:"+w+"px'>"+
+      "<rect x='0' y='0' width='"+w+"' height='"+h+"' fill='#fff' stroke='#eee'/>"+hist+
+      "<line x1='"+zeroX.toFixed(1)+"' y1='"+padTop+"' x2='"+zeroX.toFixed(1)+"' y2='"+(padTop+ih)+"' stroke='#999'/>"+
+      "<line x1='"+floorX.toFixed(1)+"' y1='"+padTop+"' x2='"+floorX.toFixed(1)+"' y2='"+(padTop+ih)+"' stroke='"+NEG+"' stroke-width='1.4' stroke-dasharray='5 3'/>"+
+      "<text x='"+(floorX+4).toFixed(1)+"' y='"+(padTop+11)+"' font-size='10' fill='"+NEG+"'>−1R floor (clean stop)</text>"+
+      meanLine+dots+ticks+"</svg>";
+    el.innerHTML=svg+cov;
+    RHIST_PTS=pts;
+    Array.prototype.forEach.call(el.querySelectorAll('.dot'), function(d){
+      var t=pts[+d.getAttribute('data-i')];
+      d.addEventListener('mousemove', function(e){ showTip(e, tipForTrade(t)); });
+      d.addEventListener('mouseleave', hideTip);
+      d.addEventListener('click', function(){ hideTip(); renderRDrill([t], esc(t.CloseDate)+' '+esc(t.Underlying)); });
+    });
+    var bl=$sel('rBlown');
+    if(bl) bl.onclick=function(e){ e.preventDefault(); renderRDrill(pts.filter(function(t){return t.R<-1.0;}), 'Blown stops (worse than −1R)'); };
+    renderRDrill(null);   // clear stale drill on re-render
   }
 
   // === calendar heatmap, grouped by close date ===
@@ -790,14 +970,19 @@ _APP_JS = r"""
   // event (P&L realized there). Open Date/Time sit next to it as supporting
   // context. EntryHour dropped from detail — redundant with OpenTime's HH
   // prefix; still available as a pivot dimension.
+  // FR-PIVOT-10: the R column (after P&L) appears only when some round-trip has
+  // an R — a DATA-level gate (stable column), mirroring Python _detail_cols.
+  var ANYR = DATA.some(function(r){return r.R!=null;});
   var COLS=[
     ['CloseDate','Close date'],['CloseTime','Close time'],
     ['OpenDate','Open date'],['OpenTime','Open time'],
     ['Setup','Setup'],['Class','Class'],['Underlying','Sym'],
     ['Direction','Dir'],['Result','Result'],['Session','Session'],
     ['EntryDOW','DOW'],['HoldBucket','Hold'],['Qty','Qty'],
-    ['PnL_USD','P&L'],['Hold_min','Hold(m)'],['Score','Score'],['Notes','Notes']
-  ];
+    ['PnL_USD','P&L']
+  ].concat(ANYR?[['R','R']]:[]).concat([
+    ['Hold_min','Hold(m)'],['Score','Score'],['Notes','Notes']
+  ]);
   // -1 = descending: newest close on top. Trader scans recent activity first.
   var sortKey='CloseDate', sortDir=-1, filterStr='';
   function detailRows(){
@@ -824,6 +1009,9 @@ _APP_JS = r"""
     rows.forEach(function(r,i){ h+='<tr><td class="row-idx">'+(i+1)+'</td>'+COLS.map(function(c){
       var v=r[c[0]], cell;
       if(c[0]==='PnL_USD') cell='<td class="'+(pnl(r)>=0?'pos':'neg')+'">'+fmt(pnl(r))+'</td>';
+      else if(c[0]==='R') cell = (r.R==null) ? '<td class="muted">—</td>'
+        : '<td class="'+(r.R>=0?'pos':'neg')+'"'+(r.R<-1.0?' title="blown stop — loss worse than -1R"':'')+'>'+
+          signedR(r.R)+(r.R<-1.0?' ⚠':'')+'</td>';
       else cell='<td>'+esc(v)+'</td>';
       return cell; }).join('')+'</tr>'; });
     h+='</tbody></table>';
@@ -881,11 +1069,13 @@ _APP_JS = r"""
   function rerender(){
     var rows = filtered();
     var k = computeKpis(rows);
+    var rk = computeRKpis(rows);          // FR-PIVOT-10 R aggregates (filter-time)
     var scoring = computeScoring(rows);
     renderRangeBanner(rows);
-    renderKpiHeadline(k);
+    renderKpiHeadline(k, rk);
     renderEquityCurve(k);
-    renderScoringTable(scoring);
+    renderRHist(rk);                       // R distribution focus chart
+    renderScoringTable(scoring, rk.r_n>0);
     renderCal();           // reads filtered() internally
     renderDetail();        // reads filtered() internally
     // PivotTable.js holds its own DOM — for Tier-1 #1 we still init it once
@@ -1034,21 +1224,36 @@ _DETAIL_COLS = (
 )
 
 
+def _detail_cols(records: list[dict]) -> tuple:
+    """Detail columns for these records — the `R` column appears (after P&L) only
+    when at least one record carries an R (FR-PIVOT-10, mirrors the JS `ANYR`
+    gate). Zero coverage ⇒ no all-empty R column."""
+    if not any(r.get("R") is not None for r in records):
+        return _DETAIL_COLS
+    out: list[tuple[str, str]] = []
+    for col in _DETAIL_COLS:
+        out.append(col)
+        if col[0] == "PnL_USD":
+            out.append(("R", "R"))
+    return tuple(out)
+
+
 def _detail_csv(records: list[dict]) -> str:
     """Serialize detail records to a CSV string for the in-browser download.
 
     Source-of-truth mirror of the JS `toCSV` (unit-tested here; the JS side is
-    verified visually). Header = the labels in `_DETAIL_COLS`, one row per
-    record in the given order. RFC-4180 quoting (stdlib csv handles `,` `"`
-    newlines), CRLF terminators, and a leading UTF-8 BOM so Excel reads CJK
-    notes without mojibake. None / missing values become empty cells. Raw
-    underlying values are emitted (numbers stay numeric) — a spreadsheet wants
-    `1234.5`, not the display-formatted `+$1,234.50`."""
+    verified visually). Header = the labels in `_detail_cols(records)` (adds an
+    `R` column when any record has one), one row per record in the given order.
+    RFC-4180 quoting (stdlib csv handles `,` `"` newlines), CRLF terminators, and
+    a leading UTF-8 BOM so Excel reads CJK notes without mojibake. None / missing
+    values become empty cells. Raw underlying values are emitted (numbers stay
+    numeric) — a spreadsheet wants `1234.5`, not `+$1,234.50`."""
+    cols = _detail_cols(records)
     buf = io.StringIO()
     w = csv.writer(buf)  # defaults: CRLF terminator + QUOTE_MINIMAL (RFC-4180)
-    w.writerow([label for _, label in _DETAIL_COLS])
+    w.writerow([label for _, label in cols])
     for r in records:
-        w.writerow(["" if r.get(k) is None else r.get(k) for k, _ in _DETAIL_COLS])
+        w.writerow(["" if r.get(k) is None else r.get(k) for k, _ in cols])
     return "﻿" + buf.getvalue()
 
 
@@ -1356,6 +1561,10 @@ def build_html(rts: list[RoundTrip], stats: dict,
 <h2>Equity curve — cumulative net P&amp;L (by close order)</h2>
 <div id="equityCurve"></div>
 
+<h2>★ R-multiple distribution — decision quality vs the −1R floor</h2>
+<div id="rHist"></div>
+<div id="rDrill"></div>
+
 <h2>By setup — performance &amp; execution (FR-PIVOT-5)</h2>
 <div id="scoringTable"></div>
 
@@ -1365,6 +1574,8 @@ def build_html(rts: list[RoundTrip], stats: dict,
 <h2>Trade detail (click a header to sort)</h2>
 <input id="detailFilter" type="text" placeholder="filter rows (substring match)…"><span id="detailCount"></span><button id="detailExport" type="button" title="download the rows currently shown as CSV">⬇ CSV</button>
 <div id="detail" class="scroll-x"></div>
+
+<div id="rtip"></div>
 
 <script>{jq}</script>
 <script>{jqui}</script>

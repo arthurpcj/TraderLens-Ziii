@@ -173,6 +173,18 @@ def test_r_scoring_per_setup_coverage():
     assert s["PB"]["expectancy_r"] == pytest.approx(-1.0)
 
 
+def test_detail_cols_adds_r_only_when_present():
+    with_r = _rec(30, "90", tid="A")        # R = +3.0
+    no_r = _rec(5, None, tid="B")           # R = None
+    cols = [k for k, _ in pivot._detail_cols([with_r, no_r])]
+    assert "R" in cols and cols.index("R") == cols.index("PnL_USD") + 1
+    assert "R" not in [k for k, _ in pivot._detail_cols([no_r])]   # zero coverage
+    # CSV surfaces the R column + raw value when any record has one
+    text = pivot._detail_csv([with_r, no_r])
+    assert "R" in text.splitlines()[0].split(",")
+    assert "3.0" in text
+
+
 def test_build_html_embeds_r_when_stop_present():
     rt = _rt("2026-05-20", "2026-05-20", 30, tid="E1")
     stats = {"round_trips": 1, "unmatched_close_qty": 0, "still_open_qty": 0}
