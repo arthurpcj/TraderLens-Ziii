@@ -1607,7 +1607,8 @@ def generate(db_path: str | Path = SQLITE_PATH, out: str | Path = DEFAULT_OUT,
 def write_template(db_path: str | Path = SQLITE_PATH,
                    out: str | Path = ANNOTATIONS_PATH) -> dict:
     """Pre-generate/refresh data/annotations.csv from current round-trips
-    (FR-PIVOT-3d). User fills setup_tag/score/notes in Excel, then re-runs pivot."""
+    (FR-PIVOT-3d). User fills setup_tag/score/notes/planned_stop in Excel, then
+    re-runs pivot. planned_stop (FR-PIVOT-10) is optional — fill it to unlock R."""
     conn = sqlite_store.connect(str(db_path))
     try:
         sqlite_store.init_schema(conn)  # idempotent: migrate DBs predating order_ref
@@ -1669,6 +1670,7 @@ def review_flow(
         print(f"       open manually: {ann_p}")
 
     print("[2/4] fill setup_tag / score / notes in Excel, save with Ctrl+S.")
+    print("      (optional: fill planned_stop = your initial stop price -> unlocks R-multiple)")
     try:
         input("      press Enter here when done (Ctrl+C to abort) ... ")
     except (KeyboardInterrupt, EOFError):
