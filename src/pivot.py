@@ -106,9 +106,10 @@ _PAGE_CSS = """
 
  .pos{color:#2b6cb0} .neg{color:#c2792e}
  /* FR-PIVOT-10 R-multiple — V3 colored chip under the dollar value */
- .rchip{display:inline-block;font-size:13px;font-weight:600;padding:1px 8px;border-radius:10px;margin-top:3px;line-height:1.5}
+ .rchip{display:inline-block;font-size:13px;font-weight:600;padding:1px 8px;border-radius:10px;margin-left:8px;vertical-align:middle;line-height:1.5}
  .rchip.pos{background:#eaf1f8;color:#2b6cb0} .rchip.neg{background:#f7eee2;color:#9c6420}
  .rcov{color:#888;font-size:11px;margin-top:6px}
+ .dd-meta{font-size:12.5px;color:#888;margin-left:9px;font-weight:400}
  /* shared floating tooltip (R chart + equity hover) */
  #rtip{position:fixed;z-index:50;pointer-events:none;display:none;background:#fff;
    border:1px solid #d8dde2;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.12);
@@ -425,6 +426,7 @@ _APP_JS = r"""
     return {
       r_n: withR.length, n_closed: closed.length, withR: withR,
       expectancy_r: mean(withR), avg_win_r: mean(wins), avg_loss_r: mean(losses),
+      total_r: withR.length ? withR.reduce(function(s,r){return s+r.R;},0) : null,
       blown: withR.filter(function(r){return r.R<-1.0;}).length,
       invalid_stops: records.filter(function(r){return r.StopStatus==='zero'||r.StopStatus==='wrong_side';}).length
     };
@@ -507,27 +509,32 @@ _APP_JS = r"""
     var pf = k.profit_factor==null ? '∞' : k.profit_factor.toFixed(2);
     var hasR = rk && rk.r_n > 0;   // FR-PIVOT-10: R surface only when coverage>0
     var dd = k.dd;
-    var ddPct = dd.pct==null ? '' : ', ' + dd.pct.toFixed(1) + '%';
-    var ddTxt = "<span class='neg'>" + signed(-dd.amount) + "</span><small>" + ddPct + ", " + dd.days + "d</small>";
+    var ddMeta = (dd.pct==null ? '' : dd.pct.toFixed(1) + '%, ') + dd.days + 'd';
+    var ddTxt = "<span class='neg'>" + signed(-dd.amount) + "</span><span class='dd-meta'>" + ddMeta + "</span>";
     // Win/Loss ratio (avg win / |avg loss|) — distinct from R-multiple (which
     // needs initial stops we don't have). Shows whether the edge survives
     // even at <50% win rate. ∞ when no losses (small-sample artifact).
     var rr = (k.avg_loss < 0) ? (Math.abs(k.avg_win) / Math.abs(k.avg_loss)) : null;
     var rrTxt = (k.avg_win <= 0 && k.avg_loss === 0) ? '—' : (rr == null ? '∞' : rr.toFixed(2));
 
-    // c[2] (optional) = R value -> a V3 colored chip under the dollar value.
+    // c[2] (optional) = R value -> a colored chip INLINE to the right of the
+    // dollar value (keeps the card at its original single-line height).
     function card(label, value, rVal){
       var chip = (rVal==null) ? '' : rChip(rVal);
-      return "<div class='card'><div class='k'>" + label + "</div><div class='v'>" + value + "</div>" + chip + "</div>";
+      return "<div class='card'><div class='k'>" + label + "</div><div class='v'>" + value + chip + "</div></div>";
     }
     function cardSection(cls_, items){
       return "<div class='" + cls_ + "'>" + items.map(function(c){return card(c[0],c[1],c[2]);}).join('') + "</div>";
     }
 
-    // Headline: just the dollars. Big.
+    // Headline: the dollars, big. When R is available, a total-R chip rides
+    // alongside — "how many units of risk you're up" (sum over the with-stop
+    // subset; the coverage badge below keeps the population honest).
+    var netChip = hasR ? "<span title='total R = sum over the " + rk.r_n +
+      " trades that have a planned stop (not all " + rk.n_closed + ")'>" + rChip(rk.total_r) + "</span>" : "";
     var headline = "<div class='cards-headline'><div class='card-xl'>" +
       "<div class='k'>Net P&L</div>" +
-      "<div class='v " + cls(k.net) + "'>" + signed(k.net) + "</div></div></div>";
+      "<div class='v " + cls(k.net) + "'>" + signed(k.net) + netChip + "</div></div></div>";
 
     // Primary edge metrics — the ones a trader actually decides off of.
     var primary = cardSection('cards-primary', [
