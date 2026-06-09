@@ -82,7 +82,7 @@ _PAGE_CSS = """
  .cards-primary{display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
    gap:10px;margin:8px 0}
 
- .cards-secondary{display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));
+ .cards-secondary{display:grid;grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));
    gap:8px;margin:8px 0 16px}
  .cards-secondary .card{padding:6px 10px}
  .cards-secondary .card .v{font-size:15px}
@@ -106,7 +106,7 @@ _PAGE_CSS = """
 
  .pos{color:#2b6cb0} .neg{color:#c2792e}
  /* FR-PIVOT-10 R-multiple — V3 colored chip under the dollar value */
- .rchip{display:inline-block;font-size:13px;font-weight:600;padding:1px 8px;border-radius:10px;margin-left:8px;vertical-align:middle;line-height:1.5}
+ .rchip{display:inline-block;font-size:12px;font-weight:600;padding:1px 6px;border-radius:10px;margin-left:6px;vertical-align:middle;line-height:1.5;white-space:nowrap}
  .rchip.pos{background:#eaf1f8;color:#2b6cb0} .rchip.neg{background:#f7eee2;color:#9c6420}
  .rcov{color:#888;font-size:11px;margin-top:6px}
  .dd-meta{font-size:12.5px;color:#888;margin-left:9px;font-weight:400}
