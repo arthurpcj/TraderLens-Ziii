@@ -11,6 +11,16 @@ The CSV export schema carries its own independent version (v1.0,
 
 ## [Unreleased]
 
+### Added
+
+- **Entry / exit fill price in the trade views** — the detail table (and its
+  CSV / Excel download) and the calendar day drill-down now show the price you
+  entered and exited at, so you can cross-reference the chart and study slippage
+  away from the tool. Prices render at each instrument's native tick width
+  (index futures 1–2 dp, FX futures 4 dp); a multi-fill order shows its
+  quantity-weighted average fill. Display-only — the frozen MTS CSV export is
+  untouched.
+
 ## [1.3.0] - 2026-06-10
 
 **R-multiple — read every trade as a multiple of the risk you planned, not
