@@ -205,7 +205,7 @@
   </div>
   <div class="brand">
     <h1>TraderLens — Trade Analytics</h1>
-    <div class="meta">generated 2026-06-09 20:05:20 EDT (New York) · neutral colors:
+    <div class="meta">generated 2026-06-10 11:45:40 EDT (New York) · neutral colors:
      <span class="pos">▲ blue = profit</span> · <span class="neg">▼ amber = loss</span></div>
   </div>
 </div>
@@ -1021,10 +1021,11 @@
     var net=day.reduce(function(s,r){return s+pnl(r);},0);
     var h='<h3>'+date+' — '+day.length+' round-trips · <span class="'+(net>=0?'pos':'neg')+'">'+fmt(net)+'</span></h3>';
     h+='<table class="grid"><thead><tr><th>Close</th><th>Underlying</th><th>Dir</th><th>Setup</th>'+
-       '<th>Qty</th><th>Hold</th><th>P&amp;L</th><th>Score</th><th>Notes</th></tr></thead><tbody>';
+       '<th>Qty</th><th>Hold</th><th>P&amp;L</th><th>Entry px</th><th>Exit px</th><th>Score</th><th>Notes</th></tr></thead><tbody>';
     day.forEach(function(r){ h+='<tr><td>'+esc(r.CloseTime)+'</td><td>'+esc(r.Underlying)+'</td>'+
       '<td>'+esc(r.Direction)+'</td><td>'+esc(r.Setup)+'</td><td>'+r.Qty+'</td>'+
       '<td>'+r.Hold_min+'m</td><td class="'+(pnl(r)>=0?'pos':'neg')+'">'+fmt(pnl(r))+'</td>'+
+      '<td>'+esc(r.OpenPx)+'</td><td>'+esc(r.ClosePx)+'</td>'+
       '<td>'+esc(r.Score)+'</td><td>'+esc(r.Notes)+'</td></tr>'; });
     $sel('drill').innerHTML=h+'</tbody></table>';
   }
@@ -1045,7 +1046,11 @@
     ['EntryDOW','DOW'],['HoldBucket','Hold'],['Qty','Qty'],
     ['PnL_USD','P&L']
   ].concat(ANYR?[['R','R']]:[]).concat([
-    ['Hold_min','Hold(m)'],['Score','Score'],['Notes','Notes']
+    // Entry/Exit px paired at the right (before Notes) — chart cross-ref + Excel.
+    // Mirror of Python _DETAIL_COLS; right-aligned numeric via default td CSS,
+    // no $ (futures prices are index points, not dollars). Keep the two in sync.
+    ['Hold_min','Hold(m)'],['Score','Score'],
+    ['OpenPx','Entry px'],['ClosePx','Exit px'],['Notes','Notes']
   ]);
   // -1 = descending: newest close on top. Trader scans recent activity first.
   var sortKey='CloseDate', sortDir=-1, filterStr='';
