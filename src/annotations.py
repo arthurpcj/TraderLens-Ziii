@@ -45,7 +45,7 @@ class AnnotationSchemaError(Exception):
 
 # annotations.csv layout: editable cols first (user fills these in Excel),
 # then read-only ref_* cols (refreshed each --tag-template run, for human ID).
-_EDITABLE_COLS = ("open_trade_id", "setup_tag", "score", "notes")
+_EDITABLE_COLS = ("open_trade_id", "setup_tag", "score", "notes", "planned_stop")
 _REF_COLS = ("ref_open_date", "ref_open_time", "ref_underlying",
              "ref_direction", "ref_pnl_usd", "ref_round_trips")
 ANNOTATION_COLUMNS = _EDITABLE_COLS + _REF_COLS
@@ -58,11 +58,23 @@ class Annotation:
     setup_tag: str            # "" if not yet filled
     score: str                # raw cell ("" / "7" / "8.5"); parse via score_value
     notes: str
+    planned_stop: str = ""    # FR-PIVOT-10: initial stop price; parse via planned_stop_value
 
     @property
     def score_value(self) -> float | None:
         try:
             return float(self.score) if self.score.strip() else None
+        except ValueError:
+            return None
+
+    @property
+    def planned_stop_value(self) -> float | None:
+        """Parsed initial planned stop price, or None if blank / non-numeric.
+
+        Same lenient parse as score_value: an Excel text cell or empty string
+        yields None (→ no R for this entry), never an exception."""
+        try:
+            return float(self.planned_stop) if self.planned_stop.strip() else None
         except ValueError:
             return None
 
@@ -123,6 +135,8 @@ def load_annotations(path: str | Path = ANNOTATIONS_PATH) -> dict[str, Annotatio
                 setup_tag=(row.get("setup_tag") or "").strip(),
                 score=(row.get("score") or "").strip(),
                 notes=(row.get("notes") or "").strip(),
+                # Old files (pre-FR-PIVOT-10) lack the column -> row.get None -> "".
+                planned_stop=(row.get("planned_stop") or "").strip(),
             )
     return out
 
@@ -235,6 +249,7 @@ def write_tag_template(
             "setup_tag": ann.setup_tag if ann else "",
             "score": ann.score if ann else "",
             "notes": ann.notes if ann else "",
+            "planned_stop": ann.planned_stop if ann else "",   # R4: preserve user's stop
             "ref_open_date": a["open_date"],
             "ref_open_time": a["open_time"],
             "ref_underlying": a["underlying"],
@@ -247,6 +262,7 @@ def write_tag_template(
         rows.append({
             "open_trade_id": tid, "setup_tag": ann.setup_tag,
             "score": ann.score, "notes": ann.notes,
+            "planned_stop": ann.planned_stop,                  # R4: preserve on orphan rows too
             "ref_open_date": "", "ref_open_time": "", "ref_underlying": "",
             "ref_direction": "", "ref_pnl_usd": "", "ref_round_trips": "",
         })

@@ -80,6 +80,42 @@ def test_score_value(raw, val):
     assert Annotation(setup_tag="", score=raw, notes="").score_value == val
 
 
+# --- planned_stop parsing (FR-PIVOT-10) ---
+
+@pytest.mark.parametrize("raw,val", [
+    ("90.5", 90.5), ("4280", 4280.0), ("  102.25 ", 102.25),   # numeric (whitespace ok)
+    ("", None), ("n/a", None), ("stop?", None),                # blank / text -> None (C2)
+    ("-5", -5.0),                                              # parses; validity is classify_stop's job
+])
+def test_planned_stop_value(raw, val):
+    assert Annotation(setup_tag="", score="", notes="", planned_stop=raw).planned_stop_value == val
+
+
+def test_planned_stop_defaults_blank():
+    # Annotation built without planned_stop (existing call sites) -> blank, None.
+    a = Annotation(setup_tag="ORB", score="7", notes="x")
+    assert a.planned_stop == "" and a.planned_stop_value is None
+
+
+def test_load_old_file_without_planned_stop_column(tmp_path):
+    # C12: a pre-FR-PIVOT-10 annotations.csv (no planned_stop column) must load
+    # unchanged, with planned_stop -> "" / None, never a schema error.
+    out = tmp_path / "annotations.csv"
+    old_cols = ["open_trade_id", "setup_tag", "score", "notes",
+                "ref_open_date", "ref_open_time", "ref_underlying",
+                "ref_direction", "ref_pnl_usd", "ref_round_trips"]
+    with out.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=old_cols)
+        w.writeheader()
+        w.writerow({"open_trade_id": "E1", "setup_tag": "ORB", "score": "8",
+                    "notes": "x", "ref_open_date": "", "ref_open_time": "",
+                    "ref_underlying": "", "ref_direction": "", "ref_pnl_usd": "",
+                    "ref_round_trips": ""})
+    anns = A.load_annotations(out)
+    assert anns["E1"].setup_tag == "ORB"
+    assert anns["E1"].planned_stop == "" and anns["E1"].planned_stop_value is None
+
+
 # --- --tag-template generation (FR-PIVOT-3d) ---
 
 def _two_round_trips():
@@ -137,6 +173,38 @@ def test_tag_template_keeps_orphaned_annotation(tmp_path):
     assert st["orphaned"] == 1
     anns = A.load_annotations(out)
     assert "GONE" in anns and anns["GONE"].setup_tag == "PB"   # user work not lost
+
+
+def test_tag_template_preserves_planned_stop(tmp_path):
+    # C13: an entered planned_stop survives a --tag-template re-run (R4).
+    out = tmp_path / "annotations.csv"
+    with out.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=A.ANNOTATION_COLUMNS)
+        w.writeheader()
+        w.writerow({"open_trade_id": "E1", "setup_tag": "ORB", "score": "8",
+                    "notes": "clean", "planned_stop": "95.5",
+                    "ref_open_date": "", "ref_open_time": "", "ref_underlying": "",
+                    "ref_direction": "", "ref_pnl_usd": "", "ref_round_trips": ""})
+    A.write_tag_template(_two_round_trips(), out)
+    anns = A.load_annotations(out)
+    assert anns["E1"].planned_stop == "95.5"            # preserved on active row
+    assert anns["E1"].planned_stop_value == 95.5
+    assert anns["E2"].planned_stop == ""                # new row -> blank
+
+
+def test_tag_template_preserves_planned_stop_on_orphan(tmp_path):
+    # orphaned annotation (entry no longer in data) keeps its planned_stop too.
+    out = tmp_path / "annotations.csv"
+    with out.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=A.ANNOTATION_COLUMNS)
+        w.writeheader()
+        w.writerow({"open_trade_id": "GONE", "setup_tag": "PB", "score": "5",
+                    "notes": "old", "planned_stop": "203.0",
+                    "ref_open_date": "", "ref_open_time": "", "ref_underlying": "",
+                    "ref_direction": "", "ref_pnl_usd": "", "ref_round_trips": ""})
+    A.write_tag_template(_two_round_trips(), out)
+    anns = A.load_annotations(out)
+    assert anns["GONE"].planned_stop == "203.0"         # user work not lost
 
 
 def test_tag_template_split_close_one_row_per_entry(tmp_path):

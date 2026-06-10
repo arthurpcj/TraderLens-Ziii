@@ -4,13 +4,24 @@
 
 **See your trading patterns clearly.** Turn your broker's trade
 history into a single self-contained HTML report — equity curve,
-calendar heatmap, per-setup scoring, drill-down detail — all
-filter-linked, all offline, no server.
+calendar heatmap, per-setup scoring, R-multiple, drill-down detail —
+all filter-linked, all offline, no server.
 
 ![TraderLens HTML pivot — overview](assets/screenshots/01-overview.png)
 
 *Screenshot from the bundled [demo data](demo/) — 50 anonymised
 trades.*
+
+### R-multiple — is your edge real, and is your stop discipline holding?
+
+Dollars hide two things: position size and risk discipline. Add the
+**planned stop** you took a trade with, and TraderLens shows **R**
+(profit ÷ planned risk) as a dimension across the whole report — plus
+one focus chart with a **−1R floor**. Hover any trade; click the ones
+that *blew through* their stop to see what the indiscipline cost, in
+dollars. Optional and per-trade — no stop, no R, nothing in your way.
+
+![R-multiple distribution](assets/screenshots/r-multiple.png)
 
 <details>
 <summary><strong>More screenshots</strong> — equity curve · calendar heatmap · by-setup scoring · pivot · detail table</summary>
@@ -27,7 +38,7 @@ trades.*
 
 ![by-setup scoring](assets/screenshots/04-by-setup.png)
 
-### Pivot table (Setup × Class slice)
+### Pivot table (Class × Setup slice)
 
 ![pivot table](assets/screenshots/05-pivot.png)
 

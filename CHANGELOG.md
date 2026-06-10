@@ -11,7 +11,39 @@ The CSV export schema carries its own independent version (v1.0,
 
 ## [Unreleased]
 
-_No changes yet._
+### Added — R-multiple (FR-PIVOT-10)
+
+Risk-normalized decision quality. R = profit ÷ planned risk, where the
+planned risk is reconstructed from a new optional annotation. R is woven
+into the existing pivot as a *dimension* (never a unit toggle) plus one
+focus chart. No fact-layer / SQLite / MTS-CSV change.
+
+- **`planned_stop` annotation column** (FR-PIVOT-3b) — an optional initial
+  stop price per entry in `annotations.csv` (surfaced in the review flow and
+  `--tag-template`). `realized_risk = |entry − planned_stop| × qty ×
+  multiplier`; `R = pnl ÷ realized_risk`. Old annotation files without the
+  column load unchanged; the value is preserved across template refreshes.
+- **R as a dimension** — colored R chips beside the dollar Expectancy /
+  Avg win / Avg loss, a by-setup `Exp R` column, and a sortable detail `R`
+  column (also in the detail CSV export). All aggregates are computed over
+  the subset that has a planned stop, with an always-visible coverage badge
+  (global + per-setup) — never silently mixing covered and uncovered trades.
+- **R distribution focus chart** — beeswarm dots (one per round-trip) over a
+  faint histogram, with a −1R discipline floor and the mean line. Hover
+  identifies the trade; clicking a dot, or the "N blew through −1R" link,
+  drills that cohort (with the dollars lost beyond plan) into a panel below.
+- **Equity-curve interactivity** — hover crosshair + tooltip (the trade at
+  that point, plus running $ and running R); click drills that trade.
+- Invalid stops (zero distance, wrong side, non-positive) are excluded from R
+  and counted in a quiet warning rather than polluting the −1R floor. When no
+  trade in view carries a stop, the whole R surface recedes to one muted line
+  pointing at the `planned_stop` column — informative, never nagging.
+
+### Boundary
+
+- The MTS CSV export is byte-for-byte unchanged — `planned_stop` is
+  internal-only and never reaches the frozen 12-column v1.0 schema (locked
+  by a regression test).
 
 ## [1.2.0] - 2026-06-03
 

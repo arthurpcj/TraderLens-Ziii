@@ -102,6 +102,100 @@ def test_scoring_rows_perf_and_execution():
     assert r["intraday_pct"] == pytest.approx(100.0)
 
 
+# --- R-multiple (FR-PIVOT-10) ---
+# _rt builds LONG entry=100.0, mult=2, qty=1. With planned_stop=90 the risk is
+# |100-90|*1*2 = 20, so R = pnl_usd/20 = pnl_pts/10 — clean integers below.
+
+def _rec(pnl_pts, stop, *, tid="E1", code="ORB"):
+    rt = _rt("2026-05-20", "2026-05-20", pnl_pts, tid=tid)
+    ann = Annotation(setup_tag=code, score="", notes="", planned_stop=(stop or ""))
+    return pivot._record(rt, code, code, ann)
+
+
+def test_record_emits_r_fields():
+    r = _rec(30, "90")                                  # +60 pnl / 20 risk = +3R
+    assert r["R"] == pytest.approx(3.0)
+    assert r["RealizedRisk"] == pytest.approx(20.0)
+    assert r["HasR"] is True and r["StopStatus"] == "ok"
+    assert r["PlannedStop"] == pytest.approx(90.0)
+
+
+def test_record_no_stop_is_null_r():
+    r = _rec(30, None)
+    assert r["R"] is None and r["RealizedRisk"] is None
+    assert r["HasR"] is False and r["StopStatus"] == "none"
+    assert r["PlannedStop"] is None
+
+
+def test_record_wrong_side_stop_is_invalid():
+    # LONG with stop ABOVE entry (110 > 100) -> not a stop-loss (C4)
+    r = _rec(-10, "110")
+    assert r["R"] is None and r["StopStatus"] == "wrong_side"
+
+
+def test_r_kpis_aggregates_over_with_stop_subset():
+    recs = [
+        _rec(30, "90", tid="A"),    # +3R
+        _rec(10, "90", tid="B"),    # +1R
+        _rec(-10, "90", tid="C"),   # -1R clean
+        _rec(-15, "90", tid="D"),   # -1.5R blown
+        _rec(5, None, tid="E"),     # no stop -> excluded
+        _rec(-10, "110", tid="F"),  # wrong-side -> invalid, excluded
+    ]
+    k = pivot._r_kpis(recs)
+    assert k["r_n"] == 4 and k["n_closed"] == 6
+    assert k["expectancy_r"] == pytest.approx((3 + 1 - 1 - 1.5) / 4)   # 0.375
+    assert k["total_r"] == pytest.approx(3 + 1 - 1 - 1.5)   # 1.5 (headline chip)
+    assert k["avg_win_r"] == pytest.approx(2.0)        # (3+1)/2
+    assert k["avg_loss_r"] == pytest.approx(-1.25)     # (-1-1.5)/2
+    assert k["blown"] == 1                              # only D < -1R
+    assert k["invalid_stops"] == 1                      # F
+
+
+def test_r_kpis_zero_coverage_is_null():
+    recs = [_rec(30, None, tid="A"), _rec(-10, None, tid="B")]
+    k = pivot._r_kpis(recs)
+    assert k["r_n"] == 0 and k["n_closed"] == 2
+    assert k["expectancy_r"] is None
+    assert k["total_r"] is None                         # mirrors JS `length ? ... : null`
+    assert k["avg_win_r"] is None and k["avg_loss_r"] is None
+    assert k["blown"] == 0 and k["invalid_stops"] == 0
+
+
+def test_r_scoring_per_setup_coverage():
+    recs = [
+        _rec(30, "90", tid="A", code="ORB"),    # ORB +3R
+        _rec(10, "90", tid="B", code="ORB"),    # ORB +1R
+        _rec(-10, "90", tid="C", code="PB"),    # PB  -1R
+        _rec(5, None, tid="G", code="PB"),      # PB  no stop
+    ]
+    s = pivot._r_scoring(recs)
+    assert s["ORB"] == {"r_n": 2, "n": 2, "expectancy_r": pytest.approx(2.0)}
+    assert s["PB"]["r_n"] == 1 and s["PB"]["n"] == 2
+    assert s["PB"]["expectancy_r"] == pytest.approx(-1.0)
+
+
+def test_detail_cols_adds_r_only_when_present():
+    with_r = _rec(30, "90", tid="A")        # R = +3.0
+    no_r = _rec(5, None, tid="B")           # R = None
+    cols = [k for k, _ in pivot._detail_cols([with_r, no_r])]
+    assert "R" in cols and cols.index("R") == cols.index("PnL_USD") + 1
+    assert "R" not in [k for k, _ in pivot._detail_cols([no_r])]   # zero coverage
+    # CSV surfaces the R column + raw value when any record has one
+    text = pivot._detail_csv([with_r, no_r])
+    assert "R" in text.splitlines()[0].split(",")
+    assert "3.0" in text
+
+
+def test_build_html_embeds_r_when_stop_present():
+    rt = _rt("2026-05-20", "2026-05-20", 30, tid="E1")
+    stats = {"round_trips": 1, "unmatched_close_qty": 0, "still_open_qty": 0}
+    anns = {"E1": Annotation(setup_tag="ORB", score="", notes="", planned_stop="90")}
+    cfg = TagConfig({"ORB": "ORB"}, {})
+    html = pivot.build_html([rt], stats, anns, cfg)
+    assert '"R": 3.0' in html and '"HasR": true' in html
+
+
 # --- build_html threads annotation layer through ---
 
 def test_build_html_smoke_and_setup_resolution():

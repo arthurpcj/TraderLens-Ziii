@@ -207,6 +207,29 @@ def test_export_state_b_multifill_keeps_full_order(tmp_path):
     assert op["trade_id"] == "A1"
 
 
+def test_planned_stop_never_leaks_to_mts_csv(tmp_path):
+    # T-EXP-1 (FR-PIVOT-10 boundary): planned_stop is an internal annotation — it
+    # must NEVER reach the frozen 12-col MTS csv. The exporter reads only
+    # setup_tag, so the contract is structurally safe; this locks it as a
+    # regression guard against a future "dump the whole annotation" mistake.
+    from src.annotations import Annotation, TagConfig
+    rows = [
+        _frow("A1", "2026-05-25", "09:31:15", "BUY", 1, 20100.25, "O", oid="OE"),
+        _frow("C9", "2026-05-25", "15:02:40", "SELL", -1, 20180.00, "C", oid="OX"),
+    ]
+    c = sqlite_store.connect(":memory:"); sqlite_store.init_schema(c)
+    sqlite_store.upsert_trades(c, rows)
+    annots = {"A1": Annotation(setup_tag="Q_intraday", score="8", notes="x",
+                               planned_stop="20050.0")}
+    exporter.export_date(c, "2026-05-25", tmp_path,
+                         annotations=annots, tag_config=TagConfig({}, {}))
+    c.close()
+    content = (tmp_path / "mts_trades_2026-05-25.csv").read_text(encoding="utf-8")
+    assert content.splitlines()[0] == ",".join(CSV_COLUMNS) and len(CSV_COLUMNS) == 12
+    assert "planned_stop" not in content
+    assert "20050" not in content                  # the stop value never appears
+
+
 def test_export_state_b_cross_date_order_not_dropped(tmp_path):
     # AGENT BUG-1: an order whose fills span two trade_dates (GTC across ET
     # midnight) is REFUSED by the full-set coalesce but MERGED per-date. Keying
