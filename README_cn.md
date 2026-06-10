@@ -33,7 +33,7 @@ TraderLens 就把 **R**(盈亏 ÷ 计划风险)作为一个维度渗进整个报
 
 ![按交易模式打分](assets/screenshots/04-by-setup.png)
 
-### 透视表(Setup × Class 切片)
+### 透视表(Class × Setup 切片)
 
 ![透视表](assets/screenshots/05-pivot.png)
 

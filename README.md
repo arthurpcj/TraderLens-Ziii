@@ -38,7 +38,7 @@ dollars. Optional and per-trade — no stop, no R, nothing in your way.
 
 ![by-setup scoring](assets/screenshots/04-by-setup.png)
 
-### Pivot table (Setup × Class slice)
+### Pivot table (Class × Setup slice)
 
 ![pivot table](assets/screenshots/05-pivot.png)
 
