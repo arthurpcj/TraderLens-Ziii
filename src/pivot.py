@@ -734,10 +734,10 @@ _APP_JS = r"""
     var el=$sel('rHist'); if(!el) return;
     var head=$sel('rHistHead');
     var pts=(rk.withR||[]).slice();
-    // Nothing to plot: collapse the section to one quiet line (hide the big
+    // No stop at all in view: collapse the section to one quiet line (dim the big
     // heading so it doesn't reserve screen) that says how to unlock R. Muted,
     // near-background, no push, platform-neutral (points at the file, not a script).
-    if(pts.length<2){
+    if(pts.length===0){
       if(head) head.className='r-quiet';   // dim (not hide): keeps section identity + spacing
       el.innerHTML="<p class='muted' style='margin:4px 0 0'>No planned stops in view — R-multiple needs your initial stop. "+
         "Add a planned_stop to trades in annotations.csv to see R (profit ÷ planned risk).</p>";
@@ -748,6 +748,15 @@ _APP_JS = r"""
       " · expectancy "+rChip(rk.expectancy_r)+
       (rk.blown? " · <a href='#' id='rBlown' class='neg'>"+rk.blown+" blew through −1R</a>":"")+
       (rk.invalid_stops? " · "+rk.invalid_stops+" invalid stop(s) ignored":"")+"</div>";
+    // Exactly one trade with a stop: coverage/expectancy are real (the badge
+    // shows them), but a beeswarm distribution needs ≥2 points — skip the plot
+    // and say so, rather than the misleading "no planned stops" copy above.
+    if(pts.length<2){
+      el.innerHTML="<p class='muted' style='margin:4px 0 0'>Only one trade with a planned stop in view — need at least two to plot a distribution.</p>"+cov;
+      var bl1=$sel('rBlown');
+      if(bl1) bl1.onclick=function(e){ e.preventDefault(); renderRDrill(pts.filter(function(t){return t.R<-1.0;}), 'Blown stops (worse than −1R)'); };
+      renderRDrill(null); return;
+    }
     var w=1180,h=270,padx=46,padTop=18,padBot=42,iw=w-2*padx,ih=h-padTop-padBot;
     function X(r){ var v=Math.max(R_LO+1e-6,Math.min(R_HI-1e-6,r)); return padx+iw*(v-R_LO)/(R_HI-R_LO); }
     // faint histogram backdrop (0.5R bins)
@@ -1454,6 +1463,9 @@ def _r_kpis(records: list[dict]) -> dict:
         "expectancy_r": (sum(rs) / len(rs)) if rs else None,
         "avg_win_r": (sum(wins) / len(wins)) if wins else None,
         "avg_loss_r": (sum(losses) / len(losses)) if losses else None,
+        # total_r: sum of R over the with-stop subset (headline Net P&L chip).
+        # None when empty, mirroring JS `withR.length ? reduce : null`.
+        "total_r": sum(rs) if rs else None,
         "blown": sum(1 for v in rs if v < -1.0),
         "invalid_stops": invalid,
     }

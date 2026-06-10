@@ -145,6 +145,7 @@ def test_r_kpis_aggregates_over_with_stop_subset():
     k = pivot._r_kpis(recs)
     assert k["r_n"] == 4 and k["n_closed"] == 6
     assert k["expectancy_r"] == pytest.approx((3 + 1 - 1 - 1.5) / 4)   # 0.375
+    assert k["total_r"] == pytest.approx(3 + 1 - 1 - 1.5)   # 1.5 (headline chip)
     assert k["avg_win_r"] == pytest.approx(2.0)        # (3+1)/2
     assert k["avg_loss_r"] == pytest.approx(-1.25)     # (-1-1.5)/2
     assert k["blown"] == 1                              # only D < -1R
@@ -156,6 +157,7 @@ def test_r_kpis_zero_coverage_is_null():
     k = pivot._r_kpis(recs)
     assert k["r_n"] == 0 and k["n_closed"] == 2
     assert k["expectancy_r"] is None
+    assert k["total_r"] is None                         # mirrors JS `length ? ... : null`
     assert k["avg_win_r"] is None and k["avg_loss_r"] is None
     assert k["blown"] == 0 and k["invalid_stops"] == 0
 
