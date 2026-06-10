@@ -11,12 +11,21 @@ The CSV export schema carries its own independent version (v1.0,
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-10
+
+**R-multiple — read every trade as a multiple of the risk you planned, not
+just dollars.** Add one optional number per trade (your initial stop) and the
+whole pivot gains a risk-normalized lens: which setups actually pay *per unit
+of risk*, how often you let a loser run past the −1R line you drew, and where
+your edge really lives once position size is taken out of the picture. It is a
+pure analytics layer — no change to the fact layer, the SQLite archive, or the
+frozen MTS CSV export.
+
 ### Added — R-multiple (FR-PIVOT-10)
 
-Risk-normalized decision quality. R = profit ÷ planned risk, where the
-planned risk is reconstructed from a new optional annotation. R is woven
-into the existing pivot as a *dimension* (never a unit toggle) plus one
-focus chart. No fact-layer / SQLite / MTS-CSV change.
+R = profit ÷ planned risk, where the planned risk is reconstructed from a new
+optional annotation. R is woven into the existing pivot as a *dimension*
+(never a unit toggle) plus one focus chart.
 
 - **`planned_stop` annotation column** (FR-PIVOT-3b) — an optional initial
   stop price per entry in `annotations.csv` (surfaced in the review flow and
