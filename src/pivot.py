@@ -987,10 +987,11 @@ _APP_JS = r"""
     var net=day.reduce(function(s,r){return s+pnl(r);},0);
     var h='<h3>'+date+' — '+day.length+' round-trips · <span class="'+(net>=0?'pos':'neg')+'">'+fmt(net)+'</span></h3>';
     h+='<table class="grid"><thead><tr><th>Close</th><th>Underlying</th><th>Dir</th><th>Setup</th>'+
-       '<th>Qty</th><th>Hold</th><th>P&amp;L</th><th>Score</th><th>Notes</th></tr></thead><tbody>';
+       '<th>Qty</th><th>Hold</th><th>P&amp;L</th><th>Entry px</th><th>Exit px</th><th>Score</th><th>Notes</th></tr></thead><tbody>';
     day.forEach(function(r){ h+='<tr><td>'+esc(r.CloseTime)+'</td><td>'+esc(r.Underlying)+'</td>'+
       '<td>'+esc(r.Direction)+'</td><td>'+esc(r.Setup)+'</td><td>'+r.Qty+'</td>'+
       '<td>'+r.Hold_min+'m</td><td class="'+(pnl(r)>=0?'pos':'neg')+'">'+fmt(pnl(r))+'</td>'+
+      '<td>'+esc(r.OpenPx)+'</td><td>'+esc(r.ClosePx)+'</td>'+
       '<td>'+esc(r.Score)+'</td><td>'+esc(r.Notes)+'</td></tr>'; });
     $sel('drill').innerHTML=h+'</tbody></table>';
   }
@@ -1011,7 +1012,11 @@ _APP_JS = r"""
     ['EntryDOW','DOW'],['HoldBucket','Hold'],['Qty','Qty'],
     ['PnL_USD','P&L']
   ].concat(ANYR?[['R','R']]:[]).concat([
-    ['Hold_min','Hold(m)'],['Score','Score'],['Notes','Notes']
+    // Entry/Exit px paired at the right (before Notes) — chart cross-ref + Excel.
+    // Mirror of Python _DETAIL_COLS; right-aligned numeric via default td CSS,
+    // no $ (futures prices are index points, not dollars). Keep the two in sync.
+    ['Hold_min','Hold(m)'],['Score','Score'],
+    ['OpenPx','Entry px'],['ClosePx','Exit px'],['Notes','Notes']
   ]);
   // -1 = descending: newest close on top. Trader scans recent activity first.
   var sortKey='CloseDate', sortDir=-1, filterStr='';
@@ -1227,8 +1232,14 @@ def _record(rt: RoundTrip, tag_code: str, tag_name: str,
         "OpenTime": rt.open_time,
         "CloseDate": rt.close_date,
         "CloseTime": rt.close_time,
-        "OpenPx": rt.open_price,
-        "ClosePx": rt.close_price,
+        # Entry/exit fill price for chart cross-reference + the CSV/Excel export
+        # (display-only; R's own price source is rt.open_price, untouched). Rounded
+        # to 4dp at this output layer per the "round only at output" invariant
+        # (roundtrip._merge_group): a ceiling, NOT zero-padding — single fills keep
+        # their native tick width (ES 2dp, M6B 4dp), only multi-fill VWAP noise
+        # (e.g. 5230.3333…) gets capped. Never enters the MTS 12-col csv (exporter).
+        "OpenPx": round(rt.open_price, 4) if rt.open_price is not None else None,
+        "ClosePx": round(rt.close_price, 4) if rt.close_price is not None else None,
         # FR-PIVOT-10 R-multiple. R kept at 4dp (kills JSON float-noise, keeps
         # aggregate precision); display rounds to 2dp. RealizedRisk at cents.
         "R": round(rinfo.r, 4) if rinfo.r is not None else None,
@@ -1250,6 +1261,7 @@ _DETAIL_COLS = (
     ("Direction", "Dir"), ("Result", "Result"), ("Session", "Session"),
     ("EntryDOW", "DOW"), ("HoldBucket", "Hold"), ("Qty", "Qty"),
     ("PnL_USD", "P&L"), ("Hold_min", "Hold(m)"), ("Score", "Score"),
+    ("OpenPx", "Entry px"), ("ClosePx", "Exit px"),
     ("Notes", "Notes"),
 )
 

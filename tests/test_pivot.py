@@ -7,6 +7,8 @@ annotation layer through into the report.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from src import pivot
@@ -131,6 +133,50 @@ def test_record_wrong_side_stop_is_invalid():
     # LONG with stop ABOVE entry (110 > 100) -> not a stop-loss (C4)
     r = _rec(-10, "110")
     assert r["R"] is None and r["StopStatus"] == "wrong_side"
+
+
+# --- entry/exit fill price (detail table + calendar drill + CSV) ---
+
+def test_record_carries_entry_exit_price():
+    # _rt: LONG entry 100.0, close 100.0+pnl_pts. Prices surfaced for display.
+    r = _rec(30, "90")
+    assert r["OpenPx"] == pytest.approx(100.0)
+    assert r["ClosePx"] == pytest.approx(130.0)
+
+
+def test_record_caps_vwap_price_noise_at_4dp():
+    # Multi-fill VWAP carries float-division noise (roundtrip._merge_group keeps
+    # full precision; _record rounds at output). 4dp is a ceiling, not padding.
+    rt = _rt("2026-05-20", "2026-05-20", 30, tid="V")
+    rt = replace(rt, open_price=5230.333333333335, close_price=18000.5)
+    r = pivot._record(rt, "ORB", "ORB", None)
+    assert r["OpenPx"] == 5230.3333          # noise capped to 4dp
+    assert r["ClosePx"] == 18000.5           # already clean -> unchanged (no padding)
+
+
+def test_record_none_price_is_none():
+    rt = _rt("2026-05-20", "2026-05-20", 30, tid="N")
+    rt = replace(rt, open_price=None, close_price=None)
+    r = pivot._record(rt, "ORB", "ORB", None)
+    assert r["OpenPx"] is None and r["ClosePx"] is None
+
+
+def test_detail_cols_price_columns_sit_before_notes():
+    keys = [k for k, _ in pivot._DETAIL_COLS]
+    assert keys.index("OpenPx") == keys.index("Notes") - 2
+    assert keys.index("ClosePx") == keys.index("Notes") - 1
+    labels = dict(pivot._DETAIL_COLS)
+    assert labels["OpenPx"] == "Entry px" and labels["ClosePx"] == "Exit px"
+
+
+def test_detail_csv_emits_raw_price_values():
+    rec = {"OpenPx": 5230.25, "ClosePx": 5236.5}
+    lines = pivot._detail_csv([rec]).replace("﻿", "").split("\r\n")
+    header = lines[0].split(",")
+    cells = lines[1].split(",")
+    assert "Entry px" in header and "Exit px" in header
+    assert cells[header.index("Entry px")] == "5230.25"   # raw number, no $
+    assert cells[header.index("Exit px")] == "5236.5"
 
 
 def test_r_kpis_aggregates_over_with_stop_subset():
