@@ -9,7 +9,7 @@ The CSV export schema carries its own independent version (v1.0,
 
 ---
 
-## [Unreleased]
+## [1.4.0] - 2026-09-29
 
 ### Added
 
@@ -20,6 +20,24 @@ The CSV export schema carries its own independent version (v1.0,
   (index futures 1–2 dp, FX futures 4 dp); a multi-fill order shows its
   quantity-weighted average fill. Display-only — the frozen MTS CSV export is
   untouched.
+
+### Fixed
+
+- **Round-trip pairing for evening/overnight futures fills** — a fill placed
+  in the evening (CME's next-session convention) could occasionally be
+  matched against the wrong opening leg, showing as a multi-day trade with
+  the wrong dates and P&L. Round-trips now always pair same-session fills
+  first, and legs are sorted in true chronological order. A cross-check
+  against IB's own realized-P&L figure flags any residual mismatch in the
+  report instead of failing silently (futures only — stock cost-basis
+  accounting can legitimately differ).
+- **Instrument multiplier precision** — a fractional contract multiplier
+  (e.g. a $0.50/point micro future) was silently truncated to 0, zeroing
+  that contract's P&L. Now parsed as a float.
+- **Options no longer leak into the archive** — an options execution was
+  occasionally misclassified as a futures or stock trade (both carry an
+  expiry date). Options remain out of scope for this tool and are now
+  correctly excluded.
 
 ## [1.3.0] - 2026-06-10
 
