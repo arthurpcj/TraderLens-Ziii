@@ -94,7 +94,11 @@ class TradeRow:
     buy_sell: str            # BUY/SELL
     quantity: int            # signed (BUY=+, SELL=-)
     trade_price: float
-    multiplier: int | None      # optional: NULL if IB omits (REQUIREMENTS §6)
+    multiplier: float | None    # optional: NULL if IB omits (REQUIREMENTS §6).
+                                 # float, not int -- some contracts (e.g. MYM,
+                                 # $0.5/pt) have a fractional multiplier; an
+                                 # earlier int() cast silently truncated it to
+                                 # 0, corrupting that contract's whole PnL
     ib_commission: float | None  # optional: NULL if IB omits (MTS treats NULL as 0)
     open_close: str          # O/C
     fifo_pnl_realized: float | None  # 0.0 on open legs, value on close; None if absent
@@ -172,13 +176,6 @@ def _to_float(raw: str) -> float:
     return float(raw)
 
 
-def _to_opt_int(raw: str | None) -> int | None:
-    # multiplier may arrive as "5" or "5.0"; None/"" -> None
-    if raw is None or raw == "":
-        return None
-    return int(float(raw))
-
-
 def _to_opt_float(raw: str | None) -> float | None:
     if raw is None or raw == "":
         return None
@@ -254,6 +251,7 @@ def parse_trades(
 
     rows: list[TradeRow] = []
     skipped = 0
+    n_options = 0
     for el in root.iter(profile.row_tag):
         a = el.attrib
         # Defensive: only execution-level rows (skip any Order/Summary leakage).
@@ -261,6 +259,19 @@ def parse_trades(
         # (EXECUTION); iterating row_tag already excludes <Order>, this guards
         # any other aggregate level.
         if a.get("levelOfDetail") not in (None, "EXECUTION"):
+            continue
+        if _is_option(a):
+            # Options are out of scope (REQUIREMENTS.md §2.2) -- silently
+            # excluded, not an error. An option execution/expiration has an
+            # `expiry` too, so the FUT-vs-STK derivation (`expiry` emptiness,
+            # the module docstring's documented AF quirk) can't tell it apart
+            # on its own; without this, an options-on-futures exercise/expiry
+            # event lands in the archive mislabeled asset_type='FUT' under
+            # the OPTION's underlying future symbol (e.g. an ES put booked as
+            # a phantom "ESZ6" futures trade at price 0/1.1 -- found via a
+            # user cross-check against a downloaded Activity Statement,
+            # which showed it under "Options On Futures", not "Futures").
+            n_options += 1
             continue
         try:
             rows.append(_build_row(a, profile=profile, run_id=run_id, now_utc=now_utc))
@@ -270,10 +281,31 @@ def parse_trades(
             skipped += 1
             log.warning("Skipping malformed %s (tradeID=%s): %s",
                         profile.row_tag, a.get("tradeID"), exc)
+    if n_options:
+        log.info("Excluded %d option execution(s) (out of scope, REQUIREMENTS.md §2.2)",
+                  n_options)
     if skipped:
         log.warning("Parsed %d trades, skipped %d malformed", len(rows), skipped)
     _verify_order_totals(root, rows, profile)
     return rows
+
+
+def _is_option(a: dict) -> bool:
+    """True if this execution is an option (on a future, a stock, or an
+    index) -- out of scope (REQUIREMENTS.md §2.2), never archived.
+
+    `putCall` ("P"/"C" vs "" for a real future/stock) is present on the
+    Activity feed even though it has no `assetCategory` attr at all (the
+    module docstring's documented quirk) -- this is the only reliable
+    non-option signal available there. `assetCategory` (present on the
+    Confirmation feed, per its own sample XML -- despite the Activity-only
+    "no assetCategory" note) is checked too, defensively, in case a future
+    Query configuration change ever surfaces it on Activity as well."""
+    put_call = a.get("putCall")
+    if put_call:
+        return True
+    asset_category = a.get("assetCategory")
+    return asset_category is not None and asset_category not in ("FUT", "STK")
 
 
 def _verify_order_totals(root, rows: list[TradeRow], profile: SourceProfile) -> None:
@@ -329,7 +361,7 @@ def _build_row(a: dict, *, profile: SourceProfile, run_id: str, now_utc: str) ->
             buy_sell=a["buySell"],
             quantity=_to_signed_int(a["quantity"]),
             trade_price=_to_float(a[profile.price_attr]),
-            multiplier=_to_opt_int(a.get("multiplier")),               # optional -> None
+            multiplier=_to_opt_float(a.get("multiplier")),             # optional -> None
             ib_commission=_to_opt_float(a.get(profile.commission_attr)),  # optional -> None
             open_close=parse_open_close(a[profile.openclose_attr]),
             fifo_pnl_realized=_parse_fifo(fifo_raw),  # TCF has none -> None

@@ -99,6 +99,37 @@ def test_derive_asset_type(expiry, expected):
     assert derive_asset_type(expiry) == expected
 
 
+def test_option_execution_excluded_via_putcall():
+    """REQUIREMENTS.md §2.2: options out of scope. An options-on-futures (or
+    equity option) execution still carries `expiry`, so FUT/STK derivation
+    alone can't exclude it -- confirmed on a real leaked case (an ES put
+    booked as a phantom "ESZ6" futures trade). `putCall` is the field that
+    actually distinguishes it on the Activity feed."""
+    from builders import af_trade, af_xml
+    rows = parse_trades(af_xml(af_trade(underlyingSymbol="ESZ6", putCall="P")))
+    assert rows == []
+
+
+def test_option_execution_excluded_via_assetcategory():
+    """Defensive secondary guard: assetCategory (present on Confirmation,
+    per its real sample XML) excludes anything not FUT/STK too."""
+    from src.parser import CONFIRMATION_PROFILE
+    from builders import tcf_trade, tcf_xml
+    rows = parse_trades(
+        tcf_xml(tcf_trade(assetCategory="OPT"), with_orders=False),
+        profile=CONFIRMATION_PROFILE,
+    )
+    assert rows == []
+
+
+def test_real_future_with_empty_putcall_not_excluded():
+    """The common case: a real future's putCall attr is present but empty --
+    must NOT be mistaken for an option."""
+    from builders import af_trade, af_xml
+    rows = parse_trades(af_xml(af_trade(putCall="")))
+    assert len(rows) == 1
+
+
 def test_malformed_xml_raises():
     with pytest.raises(FlexResponseError):
         parse_trades(b"<not valid xml<<<")
