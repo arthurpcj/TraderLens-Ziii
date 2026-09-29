@@ -115,9 +115,14 @@ def test_derived_dims_from_entry_leg():
     ("03:00:00", "ETH"), ("23:00:00", "ETH"),
 ])
 def test_session_boundaries(open_time, expected):
+    # 23:59:00 is real IB data -- CME session convention labels tradeDate the
+    # FOLLOWING business day for anything >=18:00 ET (_true_dt/BUG-2), so a
+    # realistic close leg here is dated 2026-05-21, not the same "2026-05-20"
+    # the open uses (unless the open is itself >=18:00, see 23:00:00 above).
+    close_date = "2026-05-21" if open_time < "18:00:00" else "2026-05-20"
     rows = [
         _leg("O", "2026-05-20", open_time, "BUY", 1, 100.0, "O"),
-        _leg("C", "2026-05-20", "23:59:00", "SELL", -1, 101.0, "C"),
+        _leg("C", close_date, "23:59:00", "SELL", -1, 101.0, "C"),
     ]
     assert pair_round_trips(rows)[0][0].session == expected
 
@@ -130,10 +135,15 @@ def test_hold_buckets(minutes, bucket):
     from datetime import datetime, timedelta
     open_dt = datetime(2026, 5, 20, 8, 0, 0)
     close_dt = open_dt + timedelta(minutes=minutes)
+    # Real IB data: a close at/after 18:00 ET is tradeDate-labeled the
+    # following business day (_true_dt/BUG-2) -- only the 600-minute case
+    # (08:00 + 10h = 18:00:00 exactly) crosses that cutoff here.
+    is_evening = close_dt.strftime("%H:%M:%S") >= "18:00:00"
+    close_label_date = close_dt + timedelta(days=1) if is_evening else close_dt
     rows = [
         _leg("O", open_dt.strftime("%Y-%m-%d"), open_dt.strftime("%H:%M:%S"),
              "BUY", 1, 100.0, "O"),
-        _leg("C", close_dt.strftime("%Y-%m-%d"), close_dt.strftime("%H:%M:%S"),
+        _leg("C", close_label_date.strftime("%Y-%m-%d"), close_dt.strftime("%H:%M:%S"),
              "SELL", -1, 101.0, "C"),
     ]
     assert pair_round_trips(rows)[0][0].hold_bucket == bucket
@@ -162,6 +172,126 @@ def test_unmatched_and_still_open_counted():
     assert rts == []
     assert stats["unmatched_close_qty"] == 1
     assert stats["still_open_qty"] == 1
+
+
+# --- same-day-preferred matching (BUG-2: a missing leg must not desync later
+# same-day pairs by leaving an older, unrelated lot at the front of the queue)
+
+def test_same_day_pair_not_stolen_by_older_stranded_lot():
+    # A stray earlier open (never closed -- its real close is missing from the
+    # archive, mirroring the real MES gap) must not intercept a LATER, clean
+    # same-day open/close pair for the same underlying+expiry.
+    rows = [
+        _leg("1", "2026-05-18", "09:00:00", "BUY", 1, 100.0, "O"),   # stranded
+        _leg("2", "2026-05-20", "10:00:00", "BUY", 1, 200.0, "O"),   # same-day pair
+        _leg("3", "2026-05-20", "10:30:00", "SELL", -1, 205.0, "C", fifo=5.0 * 2 - 1.24),
+    ]
+    rts, stats = pair_round_trips(rows)
+    assert len(rts) == 1
+    rt = rts[0]
+    assert rt.open_date == "2026-05-20" and rt.open_price == 200.0   # not the 05-18 lot
+    assert rt.is_intraday is True
+    assert rt.pnl_mismatch is False
+    assert stats["still_open_qty"] == 1   # the 05-18 lot stays correctly unmatched
+
+
+def test_same_day_preference_falls_back_to_oldest_when_no_same_day_lot():
+    # No same-day candidate exists for this close -> falls back to the
+    # (only) older cross-day lot, same as plain FIFO would.
+    rows = [
+        _leg("1", "2026-05-18", "09:00:00", "BUY", 1, 100.0, "O"),
+        _leg("2", "2026-05-20", "10:00:00", "SELL", -1, 110.0, "C"),
+    ]
+    rt = pair_round_trips(rows)[0][0]
+    assert rt.open_date == "2026-05-18"
+    assert rt.is_intraday is False
+
+
+def test_same_day_preference_keeps_fifo_order_among_same_day_lots():
+    # Two same-day opens + a same-day 2-lot close: same-day preference must
+    # not disturb FIFO ordering AMONG same-day candidates (oldest still first).
+    rows = [
+        _leg("1", "2026-05-20", "09:00:00", "BUY", 1, 100.0, "O"),
+        _leg("2", "2026-05-20", "09:30:00", "BUY", 1, 102.0, "O"),
+        _leg("3", "2026-05-20", "10:00:00", "SELL", -2, 110.0, "C", comm=-1.24),
+    ]
+    rts, _ = pair_round_trips(rows)
+    assert [rt.open_price for rt in rts] == [100.0, 102.0]   # FIFO order preserved
+
+
+# --- pnl vs IB's own fifo_pnl_realized cross-check ---
+
+def test_pnl_mismatch_flagged_when_fifo_disagrees():
+    # commission=0 here so pnl_usd = pnl_pts*mult = 10*2 = 20.0, but IB's own
+    # fifo_pnl_realized on the close leg says -500 (a stand-in for "this close
+    # leg's real partner isn't the open we FIFO-matched it to").
+    rows = [
+        _leg("1", "2026-05-20", "09:50:00", "BUY", 1, 100.0, "O", comm=0),
+        _leg("2", "2026-05-20", "10:20:00", "SELL", -1, 110.0, "C", comm=0, fifo=-500.0),
+    ]
+    rt = pair_round_trips(rows)[0][0]
+    assert rt.pnl_mismatch is True
+
+
+def test_pnl_mismatch_false_when_fifo_agrees():
+    rows = [
+        _leg("1", "2026-05-20", "09:50:00", "BUY", 1, 100.0, "O", comm=-0.62),
+        _leg("2", "2026-05-20", "10:20:00", "SELL", -1, 110.0, "C", comm=-0.62,
+             fifo=10 * 2 + (-0.62 - 0.62)),  # matches pnl_usd exactly
+    ]
+    rt = pair_round_trips(rows)[0][0]
+    assert rt.pnl_mismatch is False
+
+
+def test_pnl_mismatch_false_when_fifo_absent():
+    # TCF-sourced rows carry no fifo_pnl_realized -> not checkable, never flagged.
+    rows = [
+        _leg("1", "2026-05-20", "09:50:00", "BUY", 1, 100.0, "O"),
+        _leg("2", "2026-05-20", "10:20:00", "SELL", -1, 110.0, "C", fifo=None),
+    ]
+    rt = pair_round_trips(rows)[0][0]
+    assert rt.pnl_mismatch is False
+
+
+def test_pnl_mismatch_skipped_on_fifo_split_close():
+    # A split close's fifo_pnl_realized covers the WHOLE closing fill, not this
+    # RT's partial share -> comparing either split leg 1:1 against it would be
+    # a guaranteed (false) mismatch, so both splits stay unflagged.
+    rows = [
+        _leg("1", "2026-05-20", "09:00:00", "BUY", 1, 100.0, "O"),
+        _leg("2", "2026-05-20", "09:30:00", "BUY", 1, 102.0, "O"),
+        _leg("3", "2026-05-20", "10:00:00", "SELL", -2, 110.0, "C", comm=-1.24,
+             fifo=999.0),  # would mismatch either split's own pnl_usd if compared
+    ]
+    rts, stats = pair_round_trips(rows)
+    assert len(rts) == 2
+    assert all(rt.pnl_mismatch is False for rt in rts)
+    assert stats["pnl_mismatch_count"] == 0
+
+
+def test_pnl_mismatch_count_aggregates_in_stats():
+    rows = [
+        _leg("1", "2026-05-20", "09:00:00", "BUY", 1, 100.0, "O", comm=0),
+        _leg("2", "2026-05-20", "09:30:00", "SELL", -1, 110.0, "C", comm=0, fifo=-999.0),
+        _leg("3", "2026-05-21", "09:00:00", "BUY", 1, 100.0, "O", comm=0),
+        _leg("4", "2026-05-21", "09:30:00", "SELL", -1, 110.0, "C", comm=0, fifo=20.0),
+    ]
+    _, stats = pair_round_trips(rows)
+    assert stats["pnl_mismatch_count"] == 1
+
+
+def test_pnl_mismatch_never_flagged_for_stocks():
+    # Stocks can legitimately disagree with a naive FIFO reconstruction (wash
+    # sale loss deferral, non-FIFO cost basis, a lot that predates the
+    # archive window -- confirmed on a real NVDA case). Never flag them.
+    rows = [
+        _leg("1", "2026-05-20", "09:00:00", "BUY", 1, 100.0, "O", comm=0,
+             asset="STK", underlying="ABC", expiry=None, mult=1),
+        _leg("2", "2026-05-20", "09:30:00", "SELL", -1, 110.0, "C", comm=0,
+             fifo=-999.0, asset="STK", underlying="ABC", expiry=None, mult=1),
+    ]
+    rt = pair_round_trips(rows)[0][0]
+    assert rt.pnl_mismatch is False
 
 
 # --- order-id fill coalescing (FR-PIVOT-2c): C1-C15 with fabricated orders ---

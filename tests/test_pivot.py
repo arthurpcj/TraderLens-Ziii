@@ -179,6 +179,35 @@ def test_detail_csv_emits_raw_price_values():
     assert cells[header.index("Exit px")] == "5236.5"
 
 
+# --- pnl_mismatch cross-check surfacing (record + report banner) ---
+
+def test_record_carries_pnl_mismatch_flag():
+    rt = _rt("2026-05-20", "2026-05-20", 30, tid="M1")
+    assert pivot._record(rt, "ORB", "ORB", None)["PnlMismatch"] is False
+    rt = replace(rt, pnl_mismatch=True)
+    assert pivot._record(rt, "ORB", "ORB", None)["PnlMismatch"] is True
+
+
+def test_build_html_shows_mismatch_banner_when_flagged():
+    rt = _rt("2026-05-20", "2026-05-20", 50, tid="E1")
+    stats = {"round_trips": 1, "unmatched_close_qty": 0, "still_open_qty": 0,
+              "pnl_mismatch_count": 2}
+    html = pivot.build_html([rt], stats)
+    assert "2 trade(s) flagged" in html
+    assert "FIFO accounting" in html
+
+
+def test_build_html_no_mismatch_banner_when_zero_or_absent():
+    rt = _rt("2026-05-20", "2026-05-20", 50, tid="E1")
+    for stats in (
+        {"round_trips": 1, "unmatched_close_qty": 0, "still_open_qty": 0,
+         "pnl_mismatch_count": 0},
+        {"round_trips": 1, "unmatched_close_qty": 0, "still_open_qty": 0},  # key absent
+    ):
+        html = pivot.build_html([rt], stats)
+        assert "flagged" not in html
+
+
 def test_r_kpis_aggregates_over_with_stop_subset():
     recs = [
         _rec(30, "90", tid="A"),    # +3R

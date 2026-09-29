@@ -1247,6 +1247,10 @@ def _record(rt: RoundTrip, tag_code: str, tag_name: str,
         "HasR": rinfo.has_r,
         "StopStatus": rinfo.status,
         "PlannedStop": ann.planned_stop_value if ann else None,
+        # Data-quality cross-check vs IB's own fifo_pnl_realized (see
+        # RoundTrip.pnl_mismatch) -- not shown as its own detail column yet,
+        # carried for the report-level banner + future filtering/export.
+        "PnlMismatch": rt.pnl_mismatch,
     }
 
 
@@ -1544,6 +1548,13 @@ def build_html(rts: list[RoundTrip], stats: dict,
                            "dims": list(_PIVOT_DIMS)})
     # New York time, English tz abbrev (EDT/EST) — report is English-only.
     gen = datetime.now(timezone.utc).astimezone(ET_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
+    mismatch_n = stats.get("pnl_mismatch_count", 0)
+    mismatch_note = (
+        f' · <span class="neg">⚠ {mismatch_n} trade(s) flagged: P&amp;L doesn\'t match '
+        f"IB's own FIFO accounting — open/close pairing may be wrong for that "
+        f'underlying, treat entry/exit dates with caution</span>'
+        if mismatch_n else ""
+    )
     css = _read_vendor("pivot.min.css")
     jq = _read_vendor("jquery.min.js")
     jqui = _read_vendor("jquery-ui.min.js")
@@ -1582,7 +1593,7 @@ def build_html(rts: list[RoundTrip], stats: dict,
   <div class="brand">
     <h1>TraderLens — Trade Analytics</h1>
     <div class="meta">generated {gen} (New York) · neutral colors:
-     <span class="pos">▲ blue = profit</span> · <span class="neg">▼ amber = loss</span></div>
+     <span class="pos">▲ blue = profit</span> · <span class="neg">▼ amber = loss</span>{mismatch_note}</div>
   </div>
 </div>
 
@@ -1738,7 +1749,8 @@ def review_flow(
 
     out_path, stats = generate(db, out)
     print(f"[4/4] {stats['legs']} legs -> {stats['round_trips']} round-trips "
-          f"({stats['unmatched_close_qty']} unmatched-close, {stats['still_open_qty']} still-open)")
+          f"({stats['unmatched_close_qty']} unmatched-close, {stats['still_open_qty']} still-open, "
+          f"{stats['pnl_mismatch_count']} pnl-mismatch)")
     print(f"      report -> {out_path}")
     try:
         webbrowser.open(Path(out_path).resolve().as_uri())
@@ -1782,7 +1794,8 @@ def main(argv: list[str] | None = None) -> int:
 
     out_path, stats = generate(args.db, args.out, args.annotations)
     print(f"[OK] {stats['legs']} legs -> {stats['round_trips']} round-trips "
-          f"({stats['unmatched_close_qty']} unmatched-close, {stats['still_open_qty']} still-open)")
+          f"({stats['unmatched_close_qty']} unmatched-close, {stats['still_open_qty']} still-open, "
+          f"{stats['pnl_mismatch_count']} pnl-mismatch)")
     print(f"[OK] report -> {out_path}")
     return 0
 
