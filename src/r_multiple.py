@@ -76,7 +76,7 @@ def realized_risk(
     open_price: float | None,
     planned_stop: float | None,
     qty: int | None,
-    multiplier: int | None,
+    multiplier: float | None,
 ) -> float | None:
     """planned dollar risk = |entry − stop| × |qty| × multiplier (SPEC §1.1).
 

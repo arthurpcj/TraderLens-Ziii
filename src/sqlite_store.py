@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS trades (
     buy_sell           TEXT NOT NULL,
     quantity           INTEGER NOT NULL,
     trade_price        REAL NOT NULL,
-    multiplier         INTEGER,
+    multiplier         REAL,
     ib_commission      REAL,
     open_close         TEXT NOT NULL,
     fifo_pnl_realized  REAL,
